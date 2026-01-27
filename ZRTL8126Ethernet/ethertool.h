@@ -1211,4 +1211,4 @@ enum ethtool_reset_flags {
 
 #endif /* _LINUX_ETHTOOL_H */
 
-#endif
+#endif // !RTL8111Ethernet_ethertool_h
