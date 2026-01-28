@@ -1339,7 +1339,7 @@ void ZRTL8126::interruptHandler(OSObject *client, IOInterruptEventSource *src, i
         // UInt32 rxStatusMask = RxOK | RxDescUnavail | ISRIMR_V2_ROK_Q0 | (ISRIMR_V2_ROK_Q0 << 1) | (ISRIMR_V2_ROK_Q0 << 2) | (ISRIMR_V2_ROK_Q0 << 3);
         // UInt32 txStatusMask = TxOK | ISRIMR_TOK_Q0 | ISRIMR_TOK_Q1;
         /* Rx interrupt */
-        if (status & (RxOK | RxDescUnavail)) {
+        if (status & (RxOK | RxDescUnavail | RxFIFOOver)) {
             packets = rxInterrupt(netif, kNumRxDesc, NULL, NULL);
             
             if (packets)
@@ -1347,24 +1347,29 @@ void ZRTL8126::interruptHandler(OSObject *client, IOInterruptEventSource *src, i
             
             etherStats->dot3RxExtraEntry.interrupts++;
             
-            if (spareNum < kRxNumSpareMbufs)
-                refillSpareBuffers();
+            // if (spareNum < kRxNumSpareMbufs)
+            //     refillSpareBuffers();
         }
-        /* Tx interrupt */
-        if (status & (TxOK | RxOK | PCSTimeout)) {
+         /* Tx interrupt */
+        if (status & (TxOK | TxErr | TxDescUnavail)) {
             txInterrupt();
+            etherStats->dot3TxExtraEntry.interrupts++;
+        }
+        // /* Tx interrupt */
+        // if (status & (TxOK | RxOK | PCSTimeout)) {
+        //     txInterrupt();
             
-            if (status & TxOK)
-                etherStats->dot3TxExtraEntry.interrupts++;
-        }
-        if (status & (TxOK | RxOK)) {
-            WriteReg32(TIMER_INT0_8125, 0x2600);
-            WriteReg32(TCTR0_8125, 0x2600);
-            intrMask = intrMaskTimer;
-        } else if (status & PCSTimeout) {
-            WriteReg32(TIMER_INT0_8125, 0x0000);
-            intrMask = intrMaskRxTx;
-        }
+        //     if (status & TxOK)
+        //         etherStats->dot3TxExtraEntry.interrupts++;
+        // }
+        // if (status & (TxOK | RxOK)) {
+        //     WriteReg32(TIMER_INT0_8125, 0x2600);
+        //     WriteReg32(TCTR0_8125, 0x2600);
+        //     intrMask = intrMaskTimer;
+        // } else if (status & PCSTimeout) {
+        //     WriteReg32(TIMER_INT0_8125, 0x0000);
+        //     intrMask = intrMaskRxTx;
+        // }
 #ifdef DEBUG
         if (status & PCSTimeout)
             tmrInterrupts++;
@@ -1375,8 +1380,8 @@ void ZRTL8126::interruptHandler(OSObject *client, IOInterruptEventSource *src, i
      /* Tx (LinkChg | ISRIMR_V2_LINKCHG) */
     if (status & LinkChg) {
         checkLinkStatus();
-        WriteReg32(TIMER_INT0_8125, 0x000);
-        intrMask = intrMaskRxTx;
+        // WriteReg32(TIMER_INT0_8125, 0x000);
+        // intrMask = intrMaskRxTx;
     }
 done:
     WriteReg32(IMR0_8125, intrMask);
