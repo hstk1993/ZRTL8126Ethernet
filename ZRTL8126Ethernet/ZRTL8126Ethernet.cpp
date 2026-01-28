@@ -1347,8 +1347,8 @@ void ZRTL8126::interruptHandler(OSObject *client, IOInterruptEventSource *src, i
             
             etherStats->dot3RxExtraEntry.interrupts++;
             
-            // if (spareNum < kRxNumSpareMbufs)
-            //     refillSpareBuffers();
+            if (spareNum < kRxNumSpareMbufs)
+                refillSpareBuffers();
         }
          /* Tx interrupt */
         if (status & (TxOK | TxErr | TxDescUnavail)) {
