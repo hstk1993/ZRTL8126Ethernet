@@ -592,10 +592,8 @@ bool ZRTL8126::initRTL8126()
         //         intrMaskRxTx = (SYSErr | LinkChg | RxDescUnavail | TxOK | RxOK);
         //         intrMaskTimer = (SYSErr | LinkChg | RxDescUnavail | PCSTimeout | RxOK);
         // }
-        // intrMaskRxTx = (SYSErr | LinkChg | RxDescUnavail | TxOK | RxOK);
-        // intrMaskTimer = (SYSErr | LinkChg | RxDescUnavail | PCSTimeout | RxOK);
-        intrMaskRxTx = (SYSErr | LinkChg | RxDescUnavail | TxErr | TxOK | RxErr | RxOK);
-        intrMaskPoll = (SYSErr | LinkChg);
+        intrMaskRxTx = (SYSErr | LinkChg | RxDescUnavail | TxOK | RxOK);
+        intrMaskTimer = (SYSErr | LinkChg | RxDescUnavail | PCSTimeout | RxOK);
         intrMask = intrMaskRxTx;
 
         /* Get the RxConfig parameters. */
