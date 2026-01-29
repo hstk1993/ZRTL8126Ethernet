@@ -59,7 +59,6 @@ bool ZRTL8126::init(OSDictionary *properties)
         linuxData.configEEE = 0;
         linuxData.s0MagicPacket = 0;
         linuxData.hwoptimize = 0;
-        linuxData.DASH = 0;
         pciDeviceData.vendor = 0;
         pciDeviceData.device = 0;
         pciDeviceData.subsystem_vendor = 0;
@@ -439,19 +438,47 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
     UInt32 lastSeg;
     UInt32 index;
     UInt32 i;
+
     struct rtl8126_private *tp = &linuxData;
 
     
     //DebugLog("ZRTL8126: outputStart() ===>\n");
     
     if (!(test_mask((__ENABLED_M | __LINK_UP_M), &stateFlags)))  {
-        DebugLog("ZRTL8126: Interface down. Dropping packets.\n");
-        goto done;
+        while (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess) {
+               freePacket(m);
+           }
+        return kIOReturnNoResources;
     }
-    while ((txNumFreeDesc > (kMaxSegs + 3)) && (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess)) {
+    //todo
+    bool queueDirty[2] = {false, false};
+    
+    while ((interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess)) {
         cmd = 0;
         opts2 = 0;
+        UInt32 qIdx = 0;
 
+        
+        mbuf_traffic_class_t tc = mbuf_get_traffic_class(m);
+        // 2. 映射逻辑
+        switch (tc) {
+            case MBUF_TC_VO:    // 语音
+            case MBUF_TC_VI:    // 视频
+                qIdx = 1;       // 映射到高优先级硬件队列
+                break;
+                
+            case MBUF_TC_BE:    // 普通
+            case MBUF_TC_BK:    // 后台
+            default:
+                qIdx = 0;       // 映射到默认硬件队列
+                break;
+        }
+        
+        if (tx_ring[qIdx].num_tx_desc <= (kMaxSegs + 3)) {
+            freePacket(m);
+            result = kIOReturnNoResources;
+            break;
+        }
         /* Get the packet length. */
         len = (UInt32)mbuf_pkthdr_len(m);
 
@@ -523,11 +550,12 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
             freePacket(m);
             continue;
         }
-        OSAddAtomic(-numSegs, &txNumFreeDesc);
-        index = txNextDescIndex;
-        txNextDescIndex = (txNextDescIndex + numSegs) & kTxDescMask;
-        txTailPtr0 += numSegs;
-        firstDesc = &txDescArray[index];
+        OSAddAtomic(-numSegs, &tx_ring[qIdx].num_tx_desc);
+        
+        index = tx_ring[qIdx].txNextDescIndex;
+        tx_ring[qIdx].txNextDescIndex = (tx_ring[qIdx].txNextDescIndex + numSegs) & kTxDescMask;
+        tx_ring[qIdx].txTailPtr0 += numSegs;
+        firstDesc = &tx_ring[qIdx].txDescArray[index];
         lastSeg = numSegs - 1;
 
         /* Next fill in the VLAN tag.(OSSwapInt16(vlanTag) | TxVlanTag) todo */
@@ -535,15 +563,15 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
         
         /* And finally fill in the descriptors. */
         for (i = 0; i < numSegs; i++) {
-            desc = &txDescArray[index];
+            desc = &tx_ring[qIdx].txDescArray[index];
             opts1 = (((UInt32)txSegments[i].length) | cmd);
             opts1 |= (i == 0) ? FirstFrag : DescOwn;
             
             if (i == lastSeg) {
                 opts1 |= LastFrag;
-                txMbufArray[index] = m;
+                tx_ring[qIdx].txMbufArray[index] = m;
             } else {
-                txMbufArray[index] = NULL;
+                tx_ring[qIdx].txMbufArray[index] = NULL;
             }
             if (index == kTxLastDesc)
                 opts1 |= RingEnd;
@@ -556,12 +584,19 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
             ++index &= kTxDescMask;
         }
         firstDesc->opts1 |= DescOwn;
+ 
+        queueDirty[qIdx] = true;
     }
-    /* Update tail pointer. */
-    WriteReg32(SW_TAIL_PTR0_8126, txTailPtr0&tp->MaxTxDescPtrMask);
-
-    result = (txNumFreeDesc > (kMaxSegs + 3)) ? kIOReturnSuccess : kIOReturnNoResources;
-    
+        for (int q = 0; q < 2; q++) {
+            if (queueDirty[q]) {
+                WriteReg32(tx_ring[q].sw_tail_ptr_reg,
+                           tx_ring[q].txTailPtr0 & tp->MaxTxDescPtrMask);
+            }
+        }
+        if (tx_ring[0].num_tx_desc <= (kMaxSegs + 3) ||
+            tx_ring[1].num_tx_desc <= (kMaxSegs + 3)) {
+            result = kIOReturnNoResources;
+        }
 done:
     return result;
 }
@@ -705,6 +740,7 @@ IOReturn ZRTL8126::setPromiscuousMode(bool active)
     UInt32 *filterAddr = (UInt32 *)&multicastFilter;
     UInt32 mcFilter[2];
     UInt32 rxMode;
+    struct rtl8126_private *tp = &linuxData;
 
     DebugLog("ZRTL8126: setPromiscuousMode() ===>\n");
     
@@ -718,7 +754,7 @@ IOReturn ZRTL8126::setPromiscuousMode(bool active)
         mcFilter[0] = *filterAddr++;
         mcFilter[1] = *filterAddr;
     }
-    rxMode |= rxConfigReg | (ReadReg32(RxConfig) & rxConfigMask);
+    rxMode |= tp->rtl8126_rx_config | rxConfigReg | (ReadReg32(RxConfig) & rxConfigMask);
     WriteReg32(RxConfig, rxMode);
     WriteReg32(MAR0, mcFilter[0]);
     WriteReg32(MAR1, mcFilter[1]);
@@ -738,6 +774,8 @@ IOReturn ZRTL8126::setMulticastMode(bool active)
     UInt32 *filterAddr = (UInt32 *)&multicastFilter;
     UInt32 mcFilter[2];
     UInt32 rxMode;
+    struct rtl8126_private *tp = &linuxData;
+
 
     DebugLog("ZRTL8126: setMulticastMode() ===>\n");
     
@@ -749,7 +787,7 @@ IOReturn ZRTL8126::setMulticastMode(bool active)
         rxMode = (AcceptBroadcast | AcceptMyPhys);
         mcFilter[1] = mcFilter[0] = 0;
     }
-    rxMode |= rxConfigReg | (ReadReg32(RxConfig) & rxConfigMask);
+    rxMode |= tp->rtl8126_rx_config | rxConfigReg | (ReadReg32(RxConfig) & rxConfigMask);
     WriteReg32(RxConfig, rxMode);
     WriteReg32(MAR0, mcFilter[0]);
     WriteReg32(MAR1, mcFilter[1]);

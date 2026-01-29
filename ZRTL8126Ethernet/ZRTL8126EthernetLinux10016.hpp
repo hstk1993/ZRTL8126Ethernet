@@ -47,7 +47,6 @@
 #include "linux.h"
 #include "mii.h"
 #include "ethertool.h"
-#include "r8126_dash.h"
 
 #if DISABLED_CODE
 
@@ -55,7 +54,6 @@
 #include <linux/ethtool.h>
 #include <linux/interrupt.h>
 #include <linux/version.h>
-#include "r8126_dash.h"
 #include "r8126_realwow.h"
 #include "r8126_ptp.h"
 #include "r8126_rss.h"
@@ -2380,7 +2378,7 @@ struct rtl8126_private {
     
         u16 HwSuppNumTxQueues;
         u16 HwSuppNumRxQueues;
-        u32  rtl8126_rx_config;
+        u32 rtl8126_rx_config;
     
 #if DISABLED_CODE
     
@@ -2839,22 +2837,18 @@ void rtl8126_mac_ocp_write(struct rtl8126_private *tp, u16 reg_addr, u16 value);
 u16 rtl8126_mac_ocp_read(struct rtl8126_private *tp, u16 reg_addr);
 void rtl8126_clear_eth_phy_bit(struct rtl8126_private *tp, u8 addr, u16 mask);
 void rtl8126_set_eth_phy_bit(struct rtl8126_private *tp,  u8  addr, u16  mask);
-void rtl8126_ocp_write(struct rtl8126_private *tp, u16 addr, u8 len, u32 data);
 void rtl8126_oob_notify(struct rtl8126_private *tp, u8 cmd);
 void rtl8126_init_ring_indexes(struct rtl8126_private *tp);
-void rtl8126_oob_mutex_lock(struct rtl8126_private *tp);
 u32 rtl8126_ocp_read(struct rtl8126_private *tp, u16 addr, u8 len);
 u32 rtl8126_ocp_read_with_oob_base_address(struct rtl8126_private *tp, u16 addr, u8 len, u32 base_address);
 u32 rtl8126_ocp_write_with_oob_base_address(struct rtl8126_private *tp, u16 addr, u8 len, u32 value, u32 base_address);
 u32 rtl8126_eri_read(struct rtl8126_private *tp, int addr, int len, int type);
 u32 rtl8126_eri_read_with_oob_base_address(struct rtl8126_private *tp, int addr, int len, int type, u32 base_address);
-int rtl8126_eri_write(struct rtl8126_private *tp, int addr, int len, u32 value, int type);
 int rtl8126_eri_write_with_oob_base_address(struct rtl8126_private *tp, int addr, int len, u32 value, int type, u32 base_address);
 u16 rtl8126_ephy_read(struct rtl8126_private *tp, int RegAddr);
 void rtl8126_wait_txrx_fifo_empty(struct net_device *dev);
 void rtl8126_enable_now_is_oob(struct rtl8126_private *tp);
 void rtl8126_disable_now_is_oob(struct rtl8126_private *tp);
-void rtl8126_oob_mutex_unlock(struct rtl8126_private *tp);
 void rtl8126_dash2_disable_tx(struct rtl8126_private *tp);
 void rtl8126_dash2_enable_tx(struct rtl8126_private *tp);
 void rtl8126_dash2_disable_rx(struct rtl8126_private *tp);

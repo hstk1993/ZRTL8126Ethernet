@@ -17,6 +17,11 @@
 #define ReadReg8(reg)           _OSReadInt8((baseAddr), (reg))
 #define ReadReg16(reg)          OSReadLittleInt16((baseAddr), (reg))
 #define ReadReg32(reg)          OSReadLittleInt32((baseAddr), (reg))
+#define R8126_MAX_TX_QUEUES (2)
+#define R8126_MAX_RX_QUEUES_V2 (4)
+#define R8126_MAX_RX_QUEUES_V3 (16)
+#define R8126_MAX_RX_QUEUES R8126_MAX_RX_QUEUES_V3
+#define R8126_MAX_QUEUES R8126_MAX_RX_QUEUES
 
 #define super IOEthernetController
 
@@ -128,12 +133,48 @@ typedef struct RtlRxDesc {
 typedef struct RtlTxDesc {
     UInt32 opts1;
     UInt32 opts2;
-    UInt64 addr; /*
+    UInt64 addr;
     UInt32 reserved0;
     UInt32 reserved1;
     UInt32 reserved2;
-    UInt32 reserved3; */
+    UInt32 reserved3;
 } RtlTxDesc;
+
+struct rtl8126_tx_ring {
+    IOBufferMemoryDescriptor *txBufDesc;
+    IOPhysicalAddress64 txPhyAddr;
+    mbuf_t *txMbufArray;
+    
+    UInt64 txDescDoneCount;
+    UInt64 txDescDoneLast;
+    UInt32 txNextDescIndex;
+    UInt32 txDirtyDescIndex;
+    UInt32 txTailPtr0;
+    UInt32 txClosePtr0;
+
+
+    RtlTxDesc *txDescArray; /* 256-aligned Tx descriptor ring */
+
+    UInt32 NextHwDesCloPtr;
+    UInt32 BeginHwDesCloPtr;
+
+    UInt16 hw_clo_ptr_reg;
+    UInt16 sw_tail_ptr_reg;
+    UInt32 num_tx_desc; /* Number of Tx descriptor registers */
+    UInt16 tdsar_reg; /* Transmit Descriptor Start Address */
+};
+
+struct rtl8126_rx_ring {
+    IOBufferMemoryDescriptor *rxBufDesc;
+    IOPhysicalAddress64 rxPhyAddr;
+    mbuf_t *rxMbufArray;
+
+
+    RxDesc *rxDescArray; /* 256-aligned Rx descriptor ring */
+    UInt16 rdsar_reg; /* Receive Descriptor Start Address */
+    UInt32 num_rx_desc; /* Number of Rx descriptor registers */
+
+};
 
 /* RTL8125's statistics dump data structure */
 typedef struct RtlStatData {
@@ -362,6 +403,13 @@ private:
     IOMemoryMap *baseMap;
     IOMapper *mapper;
     volatile void *baseAddr;
+    
+    
+    struct rtl8126_tx_ring tx_ring[R8126_MAX_TX_QUEUES];
+    struct rtl8126_rx_ring rx_ring[R8126_MAX_RX_QUEUES];
+    UInt16 isr_reg[R8126_MAX_MSIX_VEC];
+    UInt16 imr_reg[R8126_MAX_MSIX_VEC];
+    
     
     /* transmitter data */
     IOBufferMemoryDescriptor *txBufDesc;

@@ -3358,116 +3358,12 @@ u32 rtl8126_ocp_read_with_oob_base_address(struct rtl8126_private *tp, u16 addr,
         return rtl8126_eri_read_with_oob_base_address(tp, addr, len, ERIAR_OOB, base_address);
 }
 
-u32 rtl8126_ocp_read(struct rtl8126_private *tp, u16 addr, u8 len)
-{
-        u32 value = 0;
-
-        if (!tp->AllowAccessDashOcp)
-                return 0xffffffff;
-
-        if (HW_DASH_SUPPORT_TYPE_2(tp))
-                value = rtl8126_ocp_read_with_oob_base_address(tp, addr, len, NO_BASE_ADDRESS);
-        else if (HW_DASH_SUPPORT_TYPE_3(tp))
-                value = rtl8126_ocp_read_with_oob_base_address(tp, addr, len, RTL8168FP_OOBMAC_BASE);
-
-        return value;
-}
-
 u32 rtl8126_ocp_write_with_oob_base_address(struct rtl8126_private *tp, u16 addr, u8 len, u32 value, const u32 base_address)
 {
         return rtl8126_eri_write_with_oob_base_address(tp, addr, len, value, ERIAR_OOB, base_address);
 }
 
-void rtl8126_ocp_write(struct rtl8126_private *tp, u16 addr, u8 len, u32 value)
-{
-        if (!tp->AllowAccessDashOcp)
-                return;
 
-        if (HW_DASH_SUPPORT_TYPE_2(tp))
-                rtl8126_ocp_write_with_oob_base_address(tp, addr, len, value, NO_BASE_ADDRESS);
-        else if (HW_DASH_SUPPORT_TYPE_3(tp))
-                rtl8126_ocp_write_with_oob_base_address(tp, addr, len, value, RTL8168FP_OOBMAC_BASE);
-}
-
-void rtl8126_oob_mutex_lock(struct rtl8126_private *tp)
-{
-        u8 reg_16, reg_a0;
-        u32 wait_cnt_0, wait_Cnt_1;
-        u16 ocp_reg_mutex_ib;
-        u16 ocp_reg_mutex_oob;
-        u16 ocp_reg_mutex_prio;
-
-        if (!tp->DASH)
-                return;
-
-        switch (tp->mcfg) {
-        default:
-                return;
-        }
-
-        rtl8126_ocp_write(tp, ocp_reg_mutex_ib, 1, BIT_0);
-        reg_16 = rtl8126_ocp_read(tp, ocp_reg_mutex_oob, 1);
-        wait_cnt_0 = 0;
-        while(reg_16) {
-                reg_a0 = rtl8126_ocp_read(tp, ocp_reg_mutex_prio, 1);
-                if (reg_a0) {
-                        rtl8126_ocp_write(tp, ocp_reg_mutex_ib, 1, 0x00);
-                        reg_a0 = rtl8126_ocp_read(tp, ocp_reg_mutex_prio, 1);
-                        wait_Cnt_1 = 0;
-                        while(reg_a0) {
-                                reg_a0 = rtl8126_ocp_read(tp, ocp_reg_mutex_prio, 1);
-
-                                wait_Cnt_1++;
-
-                                if (wait_Cnt_1 > 2000)
-                                        break;
-                        };
-                        rtl8126_ocp_write(tp, ocp_reg_mutex_ib, 1, BIT_0);
-
-                }
-                reg_16 = rtl8126_ocp_read(tp, ocp_reg_mutex_oob, 1);
-
-                wait_cnt_0++;
-
-                if (wait_cnt_0 > 2000)
-                        break;
-        };
-}
-
-void rtl8126_oob_mutex_unlock(struct rtl8126_private *tp)
-{
-        //u16 ocp_reg_mutex_ib;
-        //u16 ocp_reg_mutex_oob;
-        //u16 ocp_reg_mutex_prio;
-
-        if (!tp->DASH)
-                return;
-
-        switch (tp->mcfg) {
-        default:
-                return;
-        }
-
-        //rtl8126_ocp_write(tp, ocp_reg_mutex_prio, 1, BIT_0);
-        //rtl8126_ocp_write(tp, ocp_reg_mutex_ib, 1, 0x00);
-}
-
-static bool
-rtl8126_is_allow_access_dash_ocp(struct rtl8126_private *tp)
-{
-        bool allow_access = false;
-
-        if (!HW_DASH_SUPPORT_DASH(tp))
-                goto exit;
-
-        allow_access = true;
-        switch (tp->mcfg) {
-        default:
-                goto exit;
-        }
-exit:
-        return allow_access;
-}
 
 #if DISABLED_CODE
 
@@ -3965,11 +3861,6 @@ int rtl8126_eri_write_with_oob_base_address(struct rtl8126_private *tp, int addr
         udelay(R8126_CHANNEL_EXIT_DELAY_TIME);
 
         return 0;
-}
-
-int rtl8126_eri_write(struct rtl8126_private *tp, int addr, int len, u32 value, int type)
-{
-        return rtl8126_eri_write_with_oob_base_address(tp, addr, len, value, type, NO_BASE_ADDRESS);
 }
 
 static void

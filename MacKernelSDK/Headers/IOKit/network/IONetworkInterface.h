@@ -197,7 +197,8 @@ struct IOMbufQueue;
     all outbound packets sent to the interface from the data link layer.
     An output handler is registered with the interface by calling
     registerOutputHandler().
-    @param mbuf_t A packet mbuf.
+    @param         tp->HwCurrIsrVer = tp->HwSuppIsrVer;
+mbuf_t A packet mbuf.
     @param param A parameter for the output request. */
 
 typedef UInt32 (OSObject::*IOOutputAction)(mbuf_t, void * param);

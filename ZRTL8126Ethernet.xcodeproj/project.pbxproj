@@ -20,7 +20,6 @@
 				Info.plist,
 				linux.h,
 				mii.h,
-				r8126_dash.h,
 				"ZRTL8126Ethernet-Prefix.pch",
 			);
 			target = DEB90FB92F284C5800BA1D9C /* ZRTL8126Ethernet */;
