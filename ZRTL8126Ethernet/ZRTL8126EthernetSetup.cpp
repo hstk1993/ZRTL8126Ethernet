@@ -247,89 +247,112 @@ bool ZRTL8126::setupRxResources()
     IOPhysicalSegment rxSegment;
     IODMACommand::Segment64 seg;
     mbuf_t m;
-    UInt64 offset = 0;
-    UInt32 numSegs = 1;
-    UInt32 i;
+    UInt32 i,j;
     UInt32 opts1;
     bool result = false;
-    
-    /* Alloc rx mbuf_t array. */
-    rxBufArrayMem = IOMallocZero(kRxBufArraySize);
-    
-    if (!rxBufArrayMem) {
-        IOLog("ZRTL8126: Couldn't alloc receive buffer array.\n");
-        goto done;
-    }
-    rxMbufArray = (mbuf_t *)rxBufArrayMem;
+    struct rtl8126_private *tp = &linuxData;
+    struct rtl8126_rx_ring *ring;
 
-    /* Create receiver descriptor array. */
-    rxBufDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, (kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryHostPhysicallyContiguous | kIOMapInhibitCache), kRxDescSize, 0xFFFFFFFFFFFFFF00ULL);
+//    tp->HwSuppNumTxQueues = 2;
+//    tp->HwSuppNumRxQueues = 4;
     
-    if (!rxBufDesc) {
-        IOLog("ZRTL8126: Couldn't alloc rxBufDesc.\n");
-        goto error_buff;
-    }
-    if (rxBufDesc->prepare() != kIOReturnSuccess) {
-        IOLog("ZRTL8126: rxBufDesc->prepare() failed.\n");
-        goto error_prep;
-    }
-    rxDescArray = (RtlRxDesc *)rxBufDesc->getBytesNoCopy();
-
-    rxDescDmaCmd = IODMACommand::withSpecification(kIODMACommandOutputHost64, 64, 0, IODMACommand::kMapped, 0, 1, mapper, NULL);
-    
-    if (!rxDescDmaCmd) {
-        IOLog("ZRTL8126: Couldn't alloc rxDescDmaCmd.\n");
-        goto error_dma;
-    }
-    
-    if (rxDescDmaCmd->setMemoryDescriptor(rxBufDesc) != kIOReturnSuccess) {
-        IOLog("ZRTL8126: setMemoryDescriptor() failed.\n");
-        goto error_set_desc;
-    }
-    
-    if (rxDescDmaCmd->gen64IOVMSegments(&offset, &seg, &numSegs) != kIOReturnSuccess) {
-        IOLog("ZRTL8126: gen64IOVMSegments() failed.\n");
-        goto error_segm;
-    }
-    /* And the rx ring's physical address too. */
-    rxPhyAddr = seg.fIOVMAddr;
-    
-    /* Initialize rxDescArray. */
-    bzero(rxDescArray, kRxDescSize);
-    rxDescArray[kRxLastDesc].opts1 = OSSwapHostToLittleInt32(RingEnd);
-
-    for (i = 0; i < kNumRxDesc; i++) {
-        rxMbufArray[i] = NULL;
-    }
-    rxNextDescIndex = 0;
-    
-    rxMbufCursor = IOMbufNaturalMemoryCursor::withSpecification(PAGE_SIZE, 1);
-    
-    if (!rxMbufCursor) {
-        IOLog("ZRTL8126: Couldn't create rxMbufCursor.\n");
-        goto error_segm;
-    }
-
-    /* Alloc receive buffers. */
-    for (i = 0; i < kNumRxDesc; i++) {
-        m = allocatePacket(rxBufferSize);
+    for (j = 0; j < tp->HwSuppNumRxQueues; j++) {
+        UInt64 offset = 0;
+        UInt32 numSegs = 1;
+        ring = &rx_ring[j];
         
-        if (!m) {
-            IOLog("ZRTL8126: Couldn't alloc receive buffer.\n");
-            goto error_buf;
-        }
-        rxMbufArray[i] = m;
+        /* Alloc rx mbuf_t array.todo */
+        ring->rxBufArrayMem = IOMallocZero(kRxBufArraySize);
         
-        if (rxMbufCursor->getPhysicalSegments(m, &rxSegment, 1) != 1) {
-            IOLog("ZRTL8126: getPhysicalSegments() for receive buffer failed.\n");
-            goto error_buf;
+        if (!ring->rxBufArrayMem) {
+            IOLog("ZRTL8126: Couldn't alloc receive buffer array.\n");
+            goto done;
         }
-        opts1 = (UInt32)rxSegment.length;
-        opts1 |= (i == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
-        rxDescArray[i].opts1 = OSSwapHostToLittleInt32(opts1);
-        rxDescArray[i].opts2 = 0;
-        rxDescArray[i].addr = OSSwapHostToLittleInt64(rxSegment.location);
+        ring->rxMbufArray = (mbuf_t *)ring->rxBufArrayMem;
+        ring->RxDescAllocSize = ring->num_rx_desc * tp->RxDescLength;
+        /* Create receiver descriptor array. */
+        ring->rxBufDesc = IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task, (kIODirectionInOut | kIOMemoryPhysicallyContiguous | kIOMemoryHostPhysicallyContiguous | kIOMapInhibitCache), ring->RxDescAllocSize, 0xFFFFFFFFFFFFFF00ULL);
+        
+        if (!ring->rxBufDesc) {
+            IOLog("ZRTL8126: Couldn't alloc rxBufDesc.\n");
+            goto error_buff;
+        }
+        if (ring->rxBufDesc->prepare() != kIOReturnSuccess) {
+            IOLog("ZRTL8126: rxBufDesc->prepare() failed.\n");
+            goto error_prep;
+        }
+        ring->rxDescArray = (RtlRxDesc *)ring->rxBufDesc->getBytesNoCopy();
+
+        ring->rxDescDmaCmd = IODMACommand::withSpecification(kIODMACommandOutputHost64, 64, 0, IODMACommand::kMapped, 0, 1, mapper, NULL);
+        
+        if (!ring->rxDescDmaCmd) {
+            IOLog("ZRTL8126: Couldn't alloc rxDescDmaCmd.\n");
+            goto error_dma;
+        }
+        
+        if (ring->rxDescDmaCmd->setMemoryDescriptor(ring->rxBufDesc) != kIOReturnSuccess) {
+            IOLog("ZRTL8126: setMemoryDescriptor() failed.\n");
+            goto error_set_desc;
+        }
+        
+        if (ring->rxDescDmaCmd->gen64IOVMSegments(&offset, &seg, &numSegs) != kIOReturnSuccess) {
+            IOLog("ZRTL8126: gen64IOVMSegments() failed.\n");
+            goto error_segm;
+        }
+        /* And the rx ring's physical address too. */
+        ring->rxPhyAddr = seg.fIOVMAddr;
+        
+        /* Initialize rxDescArray. */
+        bzero(ring->rxDescArray, ring->RxDescAllocSize);
+        
+        switch (tp->InitRxDescType) {
+        case RX_DESC_RING_TYPE_3:
+                ((RtlRxDescV3 *)&ring->rxDescArray[kRxLastDesc])->RxDescNormalDDWord4.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        case RX_DESC_RING_TYPE_4:
+                ((RtlRxDescV4 *)&ring->rxDescArray[kRxLastDesc])->RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        default:
+                ring->rxDescArray[kRxLastDesc].opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        }
+        
+
+        for (i = 0; i <  ring->num_rx_desc; i++) {
+            ring->rxMbufArray[i] = NULL;
+        }
+        ring->rxNextDescIndex = 0;
+        
+        ring->rxMbufCursor = IOMbufNaturalMemoryCursor::withSpecification(PAGE_SIZE, 1);
+        
+        if (!ring->rxMbufCursor) {
+            IOLog("ZRTL8126: Couldn't create rxMbufCursor.\n");
+            goto error_segm;
+        }
+
+        /* Alloc receive buffers. */
+        for (i = 0; i <  ring->num_rx_desc; i++) {
+            m = allocatePacket(rxBufferSize);
+            
+            if (!m) {
+                IOLog("ZRTL8126: Couldn't alloc receive buffer.\n");
+                goto error_buf;
+            }
+            ring->rxMbufArray[i] = m;
+            
+            if (ring->rxMbufCursor->getPhysicalSegments(m, &rxSegment, 1) != 1) {
+                IOLog("ZRTL8126: getPhysicalSegments() for receive buffer failed.\n");
+                goto error_buf;
+            }
+            opts1 = (UInt32)rxSegment.length;
+            opts1 |= (i == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
+            ring->rxDescArray[i].opts1 = OSSwapHostToLittleInt32(opts1);
+            ring->rxDescArray[i].opts2 = 0;
+            ring->rxDescArray[i].addr = OSSwapHostToLittleInt64(rxSegment.location);
+        }
     }
+    
+   
     /*
      * Allocate some spare mbufs and keep them in a buffer pool, to
      * have them at hand in case replaceOrCopyPacket() fails
@@ -383,6 +406,59 @@ error_buff:
     rxMbufArray = NULL;
 
     goto done;
+}
+
+
+void ZRTL8126::markDescriptorOpts2Zero(RtlRxDesc *desc)
+
+{
+    struct rtl8126_private *tp = &linuxData;
+
+        switch (tp->InitRxDescType) {
+        case RX_DESC_RING_TYPE_3:
+                ((RtlRxDescV3 *)desc)->RxDescNormalDDWord4.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        case RX_DESC_RING_TYPE_4:
+                ((RtlRxDescV4 *)desc)->RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        default:
+                desc->opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        }
+}
+void ZRTL8126::markDescriptorOpts1(RtlRxDesc *desc,uint32_t)
+
+{
+    struct rtl8126_private *tp = &linuxData;
+
+        switch (tp->InitRxDescType) {
+        case RX_DESC_RING_TYPE_3:
+                ((RtlRxDescV3 *)desc)->RxDescNormalDDWord4.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        case RX_DESC_RING_TYPE_4:
+                ((RtlRxDescV4 *)desc)->RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        default:
+                desc->opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        }
+}
+void ZRTL8126::markDescriptorOpts2(RtlRxDesc *desc,uint32_t)
+
+{
+    struct rtl8126_private *tp = &linuxData;
+
+        switch (tp->InitRxDescType) {
+        case RX_DESC_RING_TYPE_3:
+                ((RtlRxDescV3 *)desc)->RxDescNormalDDWord4.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        case RX_DESC_RING_TYPE_4:
+                ((RtlRxDescV4 *)desc)->RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        default:
+                desc->opts1 = OSSwapHostToLittleInt32(RingEnd);
+                break;
+        }
 }
 
 void ZRTL8126::refillSpareBuffers()

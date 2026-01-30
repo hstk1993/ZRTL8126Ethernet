@@ -596,6 +596,8 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
         if (tx_ring[0].num_tx_desc <= (kMaxSegs + 3) ||
             tx_ring[1].num_tx_desc <= (kMaxSegs + 3)) {
             result = kIOReturnNoResources;
+        } else {
+            result = kIOReturnSuccess;
         }
 done:
     return result;
@@ -1161,10 +1163,11 @@ void ZRTL8126::txInterrupt()
     }
 }
 
-UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context)
+UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context,rtl8126_rx_ring *ring)
 {
     IOPhysicalSegment rxSegment;
-    RtlRxDesc *desc = &rxDescArray[rxNextDescIndex];
+    UInt32 localIdx = ring->rxNextDescIndex;
+    RxDesc *desc = &ring->rxDescArray[localIdx];    
     mbuf_t bufPkt, newPkt;
     UInt64 addr;
     UInt32 opts1, opts2;
@@ -1172,9 +1175,13 @@ UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, I
     UInt32 pktSize;
     UInt32 goodPkts = 0;
     bool replaced;
+    struct rtl8126_private *tp = &linuxData;
+
+    
+    RxDesc *desc = (RxDesc*)((UInt8*)ring->rxDescArray + (localIdx * tp->RxDescLength));
     
     while (!((descStatus1 = OSSwapLittleToHostInt32(desc->opts1)) & DescOwn) && (goodPkts < maxCount)) {
-        opts1 = (rxNextDescIndex == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
+        opts1 = (localIdx == (ring->num_rx_desc - 1)) ? (RingEnd | DescOwn) : DescOwn;
         opts2 = 0;
         addr = 0;
         

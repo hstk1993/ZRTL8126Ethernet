@@ -129,6 +129,75 @@ typedef struct RtlRxDesc {
     UInt64 addr;
 } RtlRxDesc;
 
+typedef struct RtlRxDescV3 {
+        union {
+                struct {
+                    UInt32 rsv1;
+                    UInt32 rsv2;
+                } RxDescDDWord1;
+        };
+
+        union {
+                struct {
+                    UInt32 RSSResult;
+                    UInt16 HeaderBufferLen;
+                    UInt16 HeaderInfo;
+                } RxDescNormalDDWord2;
+
+                struct {
+                    UInt32 rsv5;
+                    UInt32 rsv6;
+                } RxDescDDWord2;
+        };
+
+        union {
+            UInt64   addr;
+
+                struct {
+                    UInt32 TimeStampLow;
+                    UInt32 TimeStampHigh;
+                } RxDescTimeStamp;
+
+                struct {
+                    UInt32 rsv8;
+                    UInt32 rsv9;
+                } RxDescDDWord3;
+        };
+
+        union {
+                struct {
+                    UInt32 opts2;
+                    UInt32 opts1;
+                } RxDescNormalDDWord4;
+
+                struct {
+                    UInt16 TimeStampHHigh;
+                    UInt16 rsv11;
+                    UInt32 opts1;
+                } RxDescPTPDDWord4;
+        };
+} RtlDescV3;
+
+typedef struct RtlRxDescV4
+{
+        union
+        {
+            UInt64 addr;
+
+                struct
+                {
+                    UInt32 RSSInfo;
+                    UInt32 RSSResult;
+                } RxDescNormalDDWord1;
+        };
+
+        struct
+        {
+            UInt32 opts2;
+            UInt32 opts1;
+        } RxDescNormalDDWord2;
+}RtlDescV4;
+
 /* RTL8126's old Tx descriptor. */
 typedef struct RtlTxDesc {
     UInt32 opts1;
@@ -144,6 +213,7 @@ struct rtl8126_tx_ring {
     IOBufferMemoryDescriptor *txBufDesc;
     IOPhysicalAddress64 txPhyAddr;
     mbuf_t *txMbufArray;
+    
     
     UInt64 txDescDoneCount;
     UInt64 txDescDoneLast;
@@ -168,9 +238,16 @@ struct rtl8126_rx_ring {
     IOBufferMemoryDescriptor *rxBufDesc;
     IOPhysicalAddress64 rxPhyAddr;
     mbuf_t *rxMbufArray;
+    UInt32 rxNextDescIndex;
+    UInt32 RxDescAllocSize;
+    struct RtlRxDesc *rxDescArray;
+    IODMACommand *rxDescDmaCmd;
+    IOMbufNaturalMemoryCursor *rxMbufCursor;
 
 
-    RxDesc *rxDescArray; /* 256-aligned Rx descriptor ring */
+    
+    void *rxBufArrayMem;
+
     UInt16 rdsar_reg; /* Receive Descriptor Start Address */
     UInt32 num_rx_desc; /* Number of Rx descriptor registers */
 
@@ -337,12 +414,16 @@ private:
     bool initEventSources(IOService *provider);
     
     void interruptHandler(OSObject *client, IOInterruptEventSource *src, int count);
-    UInt32 rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context);
+    UInt32 rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context,rtl8126_rx_ring *ring);
     void txInterrupt();
     void pciErrorInterrupt();
 
     bool setupRxResources();
     bool setupTxResources();
+    void markDescriptorOpts1(RtlRxDesc *desc,uint32_t);
+    void markDescriptorOpts2(RtlRxDesc *desc,uint32_t);
+    void markDescriptorOpts2Zero(RtlRxDesc *desc);
+    void markDescriptorAddr(RtlRxDesc *desc,uint64_t);
     bool setupStatResources();
     void freeRxResources();
     void freeTxResources();
