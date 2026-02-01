@@ -755,6 +755,11 @@ This is free software, and you are welcome to redistribute it under certain cond
 
 #define RTL8126_MAC_MCU_PAGE_SIZE 256 //256 words
 
+#define RTL8126_RSS_KEY_SIZE     40  /* size of RSS Hash Key in bytes */
+#define RTL8126_MAX_INDIRECTION_TABLE_ENTRIES 128
+
+
+
 #ifndef WRITE_ONCE
 #define WRITE_ONCE(var, val) (*((volatile typeof(val) *)(&(var))) = (val))
 #endif
@@ -1858,6 +1863,24 @@ enum bits {
         BIT_30 = (1 << 30),
         BIT_31 = (1 << 31)
 };
+enum rtl8126_rss_register_content {
+        /* RSS */
+        RSS_CTRL_TCP_IPV4_SUPP = (1 << 0),
+        RSS_CTRL_IPV4_SUPP  = (1 << 1),
+        RSS_CTRL_TCP_IPV6_SUPP  = (1 << 2),
+        RSS_CTRL_IPV6_SUPP  = (1 << 3),
+        RSS_CTRL_IPV6_EXT_SUPP  = (1 << 4),
+        RSS_CTRL_TCP_IPV6_EXT_SUPP  = (1 << 5),
+        RSS_HALF_SUPP  = (1 << 7),
+        RSS_CTRL_UDP_IPV4_SUPP  = (1 << 11),
+        RSS_CTRL_UDP_IPV6_SUPP  = (1 << 12),
+        RSS_CTRL_UDP_IPV6_EXT_SUPP  = (1 << 13),
+        RSS_QUAD_CPU_EN  = (1 << 16),
+        RSS_HQ_Q_SUP_R  = (1 << 31),
+};
+#define RSS_CPU_NUM_OFFSET (16)
+#define RSS_MASK_BITS_OFFSET (8)
+
 
 #define RTL8126_CP_NUM 4
 #define RTL8126_MAX_SUPPORT_CP_LEN 110
@@ -2255,8 +2278,8 @@ struct rtl8126_regs_save {
         u32 rxq1_dsc_st_addr_2;
 
         u32 rss_ctrl;
-        //u8 rss_key[RTL8126_RSS_KEY_SIZE];
-        //u8 rss_i_table[RTL8126_MAX_INDIRECTION_TABLE_ENTRIES];
+        // u8 rss_key[RTL8126_RSS_KEY_SIZE];
+        // u8 rss_i_table[RTL8126_MAX_INDIRECTION_TABLE_ENTRIES];
         u16 rss_queue_num_sel_r;
 };
 
@@ -2441,6 +2464,9 @@ struct rtl8126_private {
         u16 eeprom_len;
         u16 cur_page;
         u32 bios_setting;
+        u8 rss_key[RTL8126_RSS_KEY_SIZE];
+        u8 rss_indir_tbl[RTL8126_MAX_INDIRECTION_TABLE_ENTRIES];
+
 
 #if DISABLED_CODE
     

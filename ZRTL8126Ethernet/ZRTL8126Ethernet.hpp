@@ -253,6 +253,11 @@ struct rtl8126_rx_ring {
 
 };
 
+struct r8126_napi {
+        void* priv;
+        int index;
+};
+
 /* RTL8125's statistics dump data structure */
 typedef struct RtlStatData {
     UInt64    txPackets;
@@ -429,6 +434,7 @@ private:
     void freeTxResources();
     void freeStatResources();
     void refillSpareBuffers();
+    void cleanupEventSources();
     
     static IOReturn refillAction(OSObject *owner, void *arg1, void *arg2, void *arg3, void *arg4);
 
@@ -466,7 +472,7 @@ private:
 
     /* Descriptor related methods. */
     inline void getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2);
-    
+    inline RtlRxDesc* getDescriptor(void* base, UInt32 index, UInt32 stride);
     /* Watchdog timer method. */
     void timerActionRTL8126(IOTimerEventSource *timer);
 
@@ -479,6 +485,7 @@ private:
     IOBasicOutputQueue *txQueue;
     
     IOInterruptEventSource *interruptSource;
+    IOInterruptEventSource *interruptSources[R8126_MIN_MSIX_VEC_8125D];
     IOTimerEventSource *timerSource;
     IOEthernetInterface *netif;
     IOMemoryMap *baseMap;
@@ -488,6 +495,8 @@ private:
     
     struct rtl8126_tx_ring tx_ring[R8126_MAX_TX_QUEUES];
     struct rtl8126_rx_ring rx_ring[R8126_MAX_RX_QUEUES];
+    struct r8126_napi r8126napi[R8126_MAX_MSIX_VEC];
+
     UInt16 isr_reg[R8126_MAX_MSIX_VEC];
     UInt16 imr_reg[R8126_MAX_MSIX_VEC];
     

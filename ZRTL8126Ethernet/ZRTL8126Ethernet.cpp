@@ -1,32 +1,37 @@
 /* add your code here */
 #include "ZRTL8126Ethernet.hpp"
 
-#pragma mark --- function prototypes ---
+#pragma mark--- function prototypes ---
 
 static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss);
 static inline void prepareTSO6(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss);
 
 static inline u32 ether_crc(int length, unsigned char *data);
 
-#pragma mark --- public methods ---
+#pragma mark--- public methods ---
 
 OSDefineMetaClassAndStructors(ZRTL8126, super)
 
-/* IOService (or its superclass) methods. */
+    /* IOService (or its superclass) methods. */
 
-bool ZRTL8126::init(OSDictionary *properties)
+    bool ZRTL8126::init(OSDictionary *properties)
 {
     bool result;
-    
+
     result = super::init(properties);
-    
-    if (result) {
+
+    if (result)
+    {
         workLoop = NULL;
         commandGate = NULL;
         pciDevice = NULL;
         mediumDict = NULL;
         txQueue = NULL;
         interruptSource = NULL;
+        for (int i = 0; i < R8126_MIN_MSIX_VEC_8125D; i++)
+        {
+            interruptSources[i] = NULL;
+        }
         timerSource = NULL;
         netif = NULL;
         netStats = NULL;
@@ -47,7 +52,7 @@ bool ZRTL8126::init(OSDictionary *properties)
 
         /* Initialize state flags. */
         stateFlags = 0;
-        
+
         mtu = ETH_DATA_LEN;
         powerState = 0;
         speed = 0;
@@ -72,12 +77,12 @@ bool ZRTL8126::init(OSDictionary *properties)
         enableCSO6 = false;
         pciPMCtrlOffset = 0;
         memset(fallBackMacAddr.bytes, 0, kIOEthernetAddressSize);
-        
+
 #ifdef DEBUG
         lastRxIntrupts = lastTxIntrupts = lastTmrIntrupts = tmrInterrupts = 0;
 #endif
     }
-    
+
 done:
     return result;
 }
@@ -85,15 +90,14 @@ done:
 void ZRTL8126::free()
 {
     UInt32 i;
-    
+
     DebugLog("ZRTL8126: free() ===>\n");
-    
-    if (workLoop) {
-        if (interruptSource) {
-            workLoop->removeEventSource(interruptSource);
-            RELEASE(interruptSource);
-        }
-        if (timerSource) {
+
+    if (workLoop)
+    {
+        cleanupEventSources();
+        if (timerSource)
+        {
             workLoop->removeEventSource(timerSource);
             RELEASE(timerSource);
         }
@@ -103,31 +107,32 @@ void ZRTL8126::free()
     RELEASE(commandGate);
     RELEASE(txQueue);
     RELEASE(mediumDict);
-    
+
     for (i = MEDIUM_INDEX_AUTO; i < MEDIUM_INDEX_COUNT; i++)
         mediumTable[i] = NULL;
-    
+
     RELEASE(baseMap);
     baseAddr = NULL;
     linuxData.mmio_addr = NULL;
-    
+
     RELEASE(pciDevice);
     freeTxResources();
     freeRxResources();
     freeStatResources();
-    
+
     DebugLog("ZRTL8126: free() <===\n");
-    
+
     super::free();
 }
 
 bool ZRTL8126::start(IOService *provider)
 {
     bool result;
-    
+
     result = super::start(provider);
 
-    if (!result) {
+    if (!result)
+    {
         IOLog("ZRTL8126: IOEthernetController::start failed.\n");
         goto done;
     }
@@ -135,71 +140,82 @@ bool ZRTL8126::start(IOService *provider)
     multicastFilter = 0;
 
     pciDevice = OSDynamicCast(IOPCIDevice, provider);
-    
-    if (!pciDevice) {
+
+    if (!pciDevice)
+    {
         IOLog("ZRTL8126: No provider.\n");
         goto done;
     }
     pciDevice->retain();
-    
-    if (!pciDevice->open(this)) {
+
+    if (!pciDevice->open(this))
+    {
         IOLog("ZRTL8126: Failed to open provider.\n");
         goto error_open;
     }
     mapper = IOMapper::copyMapperForDevice(pciDevice);
 
     getParams();
-    
-    if (!initPCIConfigSpace(pciDevice)) {
+
+    if (!initPCIConfigSpace(pciDevice))
+    {
         goto error_cfg;
     }
 
-    if (!initRTL8126()) {
+    if (!initRTL8126())
+    {
         IOLog("ZRTL8126: Failed to initialize chip.\n");
         goto error_cfg;
     }
-    
-    if (!setupMediumDict()) {
+
+    if (!setupMediumDict())
+    {
         IOLog("ZRTL8126: Failed to setup medium dictionary.\n");
         goto error_cfg;
     }
     commandGate = getCommandGate();
-    
-    if (!commandGate) {
+
+    if (!commandGate)
+    {
         IOLog("ZRTL8126: getCommandGate() failed.\n");
         goto error_gate;
     }
     commandGate->retain();
-    
-    if (!setupTxResources()) {
+
+    if (!setupTxResources())
+    {
         IOLog("ZRTL8126: Error allocating Tx resources.\n");
         goto error_dma1;
     }
 
-    if (!setupRxResources()) {
+    if (!setupRxResources())
+    {
         IOLog("ZRTL8126: Error allocating Rx resources.\n");
         goto error_dma2;
     }
 
-    if (!setupStatResources()) {
+    if (!setupStatResources())
+    {
         IOLog("ZRTL8126: Error allocating Stat resources.\n");
         goto error_dma3;
     }
 
-    if (!initEventSources(provider)) {
+    if (!initEventSources(provider))
+    {
         IOLog("ZRTL8126: initEventSources() failed.\n");
         goto error_src;
     }
-    
-    result = attachInterface(reinterpret_cast<IONetworkInterface**>(&netif));
 
-    if (!result) {
+    result = attachInterface(reinterpret_cast<IONetworkInterface **>(&netif));
+
+    if (!result)
+    {
         IOLog("ZRTL8126: attachInterface() failed.\n");
         goto error_src;
     }
     pciDevice->close(this);
     result = true;
-    
+
 done:
     return result;
 
@@ -211,16 +227,16 @@ error_dma3:
 
 error_dma2:
     freeTxResources();
-    
+
 error_dma1:
     RELEASE(commandGate);
-        
+
 error_gate:
     RELEASE(mediumDict);
 
 error_cfg:
     pciDevice->close(this);
-    
+
 error_open:
     pciDevice->release();
     pciDevice = NULL;
@@ -230,17 +246,17 @@ error_open:
 void ZRTL8126::stop(IOService *provider)
 {
     UInt32 i;
-    
-    if (netif) {
+
+    if (netif)
+    {
         detachInterface(netif);
         netif = NULL;
     }
-    if (workLoop) {
-        if (interruptSource) {
-            workLoop->removeEventSource(interruptSource);
-            RELEASE(interruptSource);
-        }
-        if (timerSource) {
+    if (workLoop)
+    {
+        cleanupEventSources();
+        if (timerSource)
+        {
             workLoop->removeEventSource(timerSource);
             RELEASE(timerSource);
         }
@@ -250,7 +266,7 @@ void ZRTL8126::stop(IOService *provider)
     RELEASE(commandGate);
     RELEASE(txQueue);
     RELEASE(mediumDict);
-    
+
     for (i = MEDIUM_INDEX_AUTO; i < MEDIUM_INDEX_COUNT; i++)
         mediumTable[i] = NULL;
 
@@ -263,23 +279,22 @@ void ZRTL8126::stop(IOService *provider)
     linuxData.mmio_addr = NULL;
 
     RELEASE(pciDevice);
-    
+
     super::stop(provider);
 }
 
 /* Power Management Support */
 static IOPMPowerState powerStateArray[kPowerStateCount] =
-{
-    {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    {1, kIOPMDeviceUsable, kIOPMPowerOn, kIOPMPowerOn, 0, 0, 0, 0, 0, 0, 0, 0}
-};
+    {
+        {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+        {1, kIOPMDeviceUsable, kIOPMPowerOn, kIOPMPowerOn, 0, 0, 0, 0, 0, 0, 0, 0}};
 
 IOReturn ZRTL8126::registerWithPolicyMaker(IOService *policyMaker)
 {
     DebugLog("ZRTL8126: registerWithPolicyMaker() ===>\n");
-    
+
     powerState = kPowerStateOn;
-    
+
     DebugLog("ZRTL8126: registerWithPolicyMaker() <===\n");
 
     return policyMaker->registerPowerDriver(this, powerStateArray, kPowerStateCount);
@@ -288,22 +303,23 @@ IOReturn ZRTL8126::registerWithPolicyMaker(IOService *policyMaker)
 IOReturn ZRTL8126::setPowerState(unsigned long powerStateOrdinal, IOService *policyMaker)
 {
     IOReturn result = IOPMAckImplied;
-    
+
     DebugLog("ZRTL8126: setPowerState() ===>\n");
-        
-    if (powerStateOrdinal == powerState) {
+
+    if (powerStateOrdinal == powerState)
+    {
         DebugLog("ZRTL8126: Already in power state %lu.\n", powerStateOrdinal);
         goto done;
     }
     DebugLog("ZRTL8126: switching to power state %lu.\n", powerStateOrdinal);
-    
+
     if (powerStateOrdinal == kPowerStateOff)
         commandGate->runAction(setPowerStateSleepAction);
     else
         commandGate->runAction(setPowerStateWakeAction);
 
     powerState = powerStateOrdinal;
-    
+
 done:
     DebugLog("ZRTL8126: setPowerState() <===\n");
 
@@ -313,14 +329,15 @@ done:
 void ZRTL8126::systemWillShutdown(IOOptionBits specifier)
 {
     DebugLog("ZRTL8126: systemWillShutdown() ===>\n");
-    
-    if ((kIOMessageSystemWillPowerOff | kIOMessageSystemWillRestart) & specifier) {
+
+    if ((kIOMessageSystemWillPowerOff | kIOMessageSystemWillRestart) & specifier)
+    {
         disable(netif);
-        
+
         /* Restore the original MAC address. */
         rtl8126_rar_set(&linuxData, (UInt8 *)&origMacAddr.bytes);
     }
-    
+
     DebugLog("ZRTL8126: systemWillShutdown() <===\n");
 
     /* Must call super shutdown or system will stall. */
@@ -332,31 +349,42 @@ IOReturn ZRTL8126::enable(IONetworkInterface *netif)
 {
     const IONetworkMedium *selectedMedium;
     IOReturn result = kIOReturnError;
-    
+
     DebugLog("ZRTL8126: enable() ===>\n");
 
-    if (test_bit(__ENABLED, &stateFlags)) {
+    if (test_bit(__ENABLED, &stateFlags))
+    {
         DebugLog("ZRTL8126: Interface already enabled.\n");
         result = kIOReturnSuccess;
         goto done;
     }
-    if (!pciDevice || pciDevice->isOpen()) {
+    if (!pciDevice || pciDevice->isOpen())
+    {
         IOLog("ZRTL8126: Unable to open PCI device.\n");
         goto done;
     }
     pciDevice->open(this);
-    
+
     selectedMedium = getSelectedMedium();
-    
-    if (!selectedMedium) {
+
+    if (!selectedMedium)
+    {
         DebugLog("ZRTL8126: No medium selected. Falling back to autonegotiation.\n");
         selectedMedium = mediumTable[MEDIUM_INDEX_AUTO];
     }
     selectMedium(selectedMedium);
     enableRTL8126();
-    
+
     /* We have to enable the interrupt because we are using a msi interrupt. */
-    interruptSource->enable();
+    // interruptSource->enable();
+
+    for (int i = 0; i < R8126_MIN_MSIX_VEC_8125D; i++)
+    {
+        if (interruptSources[i])
+        {
+            interruptSources[i]->enable();
+        }
+    }
 
     txDescDoneCount = txDescDoneLast = 0;
     deadlockWarn = 0;
@@ -365,7 +393,7 @@ IOReturn ZRTL8126::enable(IONetworkInterface *netif)
     clear_bit(__POLL_MODE, &stateFlags);
 
     result = kIOReturnSuccess;
-    
+
     DebugLog("ZRTL8126: enable() <===\n");
 
 done:
@@ -380,20 +408,22 @@ IOReturn ZRTL8126::disable(IONetworkInterface *netif)
     UInt64 t;
 
     DebugLog("ZRTL8126: disable() ===>\n");
-    
+
     if (!test_bit(__ENABLED, &stateFlags))
         goto done;
-    
+
     netif->stopOutputThread();
     netif->flushOutputQueue();
-    
-    if (test_bit(__POLLING, &stateFlags)) {
+
+    if (test_bit(__POLLING, &stateFlags))
+    {
         nanoseconds_to_absolutetime(5000, &delay);
         clock_get_uptime(&now);
         timeout = delay * 10;
         t = delay;
 
-        while (test_bit(__POLLING, &stateFlags) && (t < timeout)) {
+        while (test_bit(__POLLING, &stateFlags) && (t < timeout))
+        {
             clock_delay_until(now + t);
             t += delay;
         }
@@ -405,22 +435,29 @@ IOReturn ZRTL8126::disable(IONetworkInterface *netif)
     txDescDoneCount = txDescDoneLast = 0;
 
     /* Disable interrupt as we are using msi. */
-    interruptSource->disable();
+    // interruptSource->disable();
+    for (int i = 0; i < R8126_MIN_MSIX_VEC_8125D; i++)
+    {
+        if (interruptSources[i])
+        {
+            interruptSources[i]->disable();
+        }
+    }
 
     disableRTL8126();
-    
+
     clearRxTxRings();
-    
+
     if (pciDevice && pciDevice->isOpen())
         pciDevice->close(this);
-        
+
     DebugLog("ZRTL8126: disable() <===\n");
-    
+
 done:
     return kIOReturnSuccess;
 }
 
-IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits options )
+IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits options)
 {
     IOPhysicalSegment txSegments[kMaxSegs];
     mbuf_t m;
@@ -438,52 +475,22 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
     UInt32 lastSeg;
     UInt32 index;
     UInt32 i;
-
-    struct rtl8126_private *tp = &linuxData;
-
     
-    //DebugLog("ZRTL8126: outputStart() ===>\n");
+    //DebugLog("outputStart() ===>\n");
     
     if (!(test_mask((__ENABLED_M | __LINK_UP_M), &stateFlags)))  {
-        while (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess) {
-               freePacket(m);
-           }
-        return kIOReturnNoResources;
+        DebugLog("Interface down. Dropping packets.\n");
+        goto done;
     }
-    //todo
-    bool queueDirty[2] = {false, false};
-    
-    while ((interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess)) {
+    while ((txNumFreeDesc > (kMaxSegs + 3)) && (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess)) {
         cmd = 0;
         opts2 = 0;
-        UInt32 qIdx = 0;
 
-        
-        mbuf_traffic_class_t tc = mbuf_get_traffic_class(m);
-        // 2. 映射逻辑
-        switch (tc) {
-            case MBUF_TC_VO:    // 语音
-            case MBUF_TC_VI:    // 视频
-                qIdx = 1;       // 映射到高优先级硬件队列
-                break;
-                
-            case MBUF_TC_BE:    // 普通
-            case MBUF_TC_BK:    // 后台
-            default:
-                qIdx = 0;       // 映射到默认硬件队列
-                break;
-        }
-        
-        if (tx_ring[qIdx].num_tx_desc <= (kMaxSegs + 3)) {
-            freePacket(m);
-            result = kIOReturnNoResources;
-            break;
-        }
         /* Get the packet length. */
         len = (UInt32)mbuf_pkthdr_len(m);
 
         if (mbuf_get_tso_requested(m, &offloadFlags, &mss)) {
-            DebugLog("ZRTL8126: mbuf_get_tso_requested() failed. Dropping packet.\n");
+            DebugLog("mbuf_get_tso_requested() failed. Dropping packet.\n");
             freePacket(m);
             continue;
         }
@@ -546,32 +553,31 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
          * least one unused.
          */
         if (!numSegs) {
-            DebugLog("ZRTL8126: getPhysicalSegmentsWithCoalesce() failed. Dropping packet.\n");
+            DebugLog("getPhysicalSegmentsWithCoalesce() failed. Dropping packet.\n");
             freePacket(m);
             continue;
         }
-        OSAddAtomic(-numSegs, &tx_ring[qIdx].num_tx_desc);
-        
-        index = tx_ring[qIdx].txNextDescIndex;
-        tx_ring[qIdx].txNextDescIndex = (tx_ring[qIdx].txNextDescIndex + numSegs) & kTxDescMask;
-        tx_ring[qIdx].txTailPtr0 += numSegs;
-        firstDesc = &tx_ring[qIdx].txDescArray[index];
+        OSAddAtomic(-numSegs, &txNumFreeDesc);
+        index = txNextDescIndex;
+        txNextDescIndex = (txNextDescIndex + numSegs) & kTxDescMask;
+        txTailPtr0 += numSegs;
+        firstDesc = &txDescArray[index];
         lastSeg = numSegs - 1;
-
-        /* Next fill in the VLAN tag.(OSSwapInt16(vlanTag) | TxVlanTag) todo */
-        // opts2 |= (getVlanTagDemand(m, &vlanTag)) ? (OSSwapInt16(vlanTag) | TxVlanTag) : 0;
+        
+        /* Next fill in the VLAN tag. */
+        opts2 |= (getVlanTagDemand(m, &vlanTag)) ? (OSSwapInt16(vlanTag) | TxVlanTag) : 0;
         
         /* And finally fill in the descriptors. */
         for (i = 0; i < numSegs; i++) {
-            desc = &tx_ring[qIdx].txDescArray[index];
+            desc = &txDescArray[index];
             opts1 = (((UInt32)txSegments[i].length) | cmd);
             opts1 |= (i == 0) ? FirstFrag : DescOwn;
             
             if (i == lastSeg) {
                 opts1 |= LastFrag;
-                tx_ring[qIdx].txMbufArray[index] = m;
+                txMbufArray[index] = m;
             } else {
-                tx_ring[qIdx].txMbufArray[index] = NULL;
+                txMbufArray[index] = NULL;
             }
             if (index == kTxLastDesc)
                 opts1 |= RingEnd;
@@ -580,26 +586,19 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
             desc->opts2 = OSSwapHostToLittleInt32(opts2);
             desc->opts1 = OSSwapHostToLittleInt32(opts1);
             
-            DebugLog("ZRTL8126: outputStartopts1=0x%x, opts2=0x%x, addr=0x%llx, len=0x%llx\n", opts1, opts2, txSegments[i].location, txSegments[i].length);
+            //DebugLog("opts1=0x%x, opts2=0x%x, addr=0x%llx, len=0x%llx\n", opts1, opts2, txSegments[i].location, txSegments[i].length);
             ++index &= kTxDescMask;
         }
         firstDesc->opts1 |= DescOwn;
- 
-        queueDirty[qIdx] = true;
     }
-        for (int q = 0; q < 2; q++) {
-            if (queueDirty[q]) {
-                WriteReg32(tx_ring[q].sw_tail_ptr_reg,
-                           tx_ring[q].txTailPtr0 & tp->MaxTxDescPtrMask);
-            }
-        }
-        if (tx_ring[0].num_tx_desc <= (kMaxSegs + 3) ||
-            tx_ring[1].num_tx_desc <= (kMaxSegs + 3)) {
-            result = kIOReturnNoResources;
-        } else {
-            result = kIOReturnSuccess;
-        }
+    /* Update tail pointer. */
+    WriteReg16(SW_TAIL_PTR0_8125, txTailPtr0 & 0xffff);
+
+    result = (txNumFreeDesc > (kMaxSegs + 3)) ? kIOReturnSuccess : kIOReturnNoResources;
+    
 done:
+    //DebugLog("outputStart() <===\n");
+    
     return result;
 }
 
@@ -609,33 +608,33 @@ void ZRTL8126::getPacketBufferConstraints(IOPacketBufferConstraints *constraints
 
     constraints->alignStart = kIOPacketBufferAlign1;
     constraints->alignLength = kIOPacketBufferAlign1;
-    
+
     DebugLog("ZRTL8126: getPacketBufferConstraints() <===\n");
 }
 
-IOOutputQueue* ZRTL8126::createOutputQueue()
+IOOutputQueue *ZRTL8126::createOutputQueue()
 {
     DebugLog("ZRTL8126: createOutputQueue() ===>\n");
-    
+
     DebugLog("ZRTL8126: createOutputQueue() <===\n");
 
     return IOBasicOutputQueue::withTarget(this);
 }
 
-const OSString* ZRTL8126::newVendorString() const
+const OSString *ZRTL8126::newVendorString() const
 {
     DebugLog("ZRTL8126: newVendorString() ===>\n");
-    
+
     DebugLog("ZRTL8126: newVendorString() <===\n");
 
     return OSString::withCString("Realtek");
 }
 
-const OSString* ZRTL8126::newModelString() const
+const OSString *ZRTL8126::newModelString() const
 {
     DebugLog("ZRTL8126: newModelString() ===>\n");
     DebugLog("ZRTL8126: newModelString() <===\n");
-    
+
     return OSString::withCString(rtl_chip_info[linuxData.chipset].name);
 }
 
@@ -649,17 +648,19 @@ bool ZRTL8126::configureInterface(IONetworkInterface *interface)
     DebugLog("ZRTL8126: configureInterface() ===>\n");
 
     result = super::configureInterface(interface);
-    
+
     if (!result)
         goto done;
-    
+
     /* Get the generic network statistics structure. */
     data = interface->getParameter(kIONetworkStatsKey);
-    
-    if (data) {
+
+    if (data)
+    {
         netStats = (IONetworkStats *)data->getBuffer();
-        
-        if (!netStats) {
+
+        if (!netStats)
+        {
             IOLog("ZRTL8126: Error getting IONetworkStats\n.");
             result = false;
             goto done;
@@ -667,33 +668,37 @@ bool ZRTL8126::configureInterface(IONetworkInterface *interface)
     }
     /* Get the Ethernet statistics structure. */
     data = interface->getParameter(kIOEthernetStatsKey);
-    
-    if (data) {
+
+    if (data)
+    {
         etherStats = (IOEthernetStats *)data->getBuffer();
-        
-        if (!etherStats) {
+
+        if (!etherStats)
+        {
             IOLog("ZRTL8126: Error getting IOEthernetStats\n.");
             result = false;
             goto done;
         }
     }
-    error = interface->configureOutputPullModel((kNumTxDesc/2), 0, 0, IONetworkInterface::kOutputPacketSchedulingModelNormal);
-    
-    if (error != kIOReturnSuccess) {
+    error = interface->configureOutputPullModel((kNumTxDesc / 2), 0, 0, IONetworkInterface::kOutputPacketSchedulingModelNormal);
+
+    if (error != kIOReturnSuccess)
+    {
         IOLog("ZRTL8126: configureOutputPullModel() failed\n.");
         result = false;
         goto done;
     }
     error = interface->configureInputPacketPolling(kNumRxDesc, 0);
-    
-    if (error != kIOReturnSuccess) {
+
+    if (error != kIOReturnSuccess)
+    {
         IOLog("ZRTL8126: configureInputPacketPolling() failed\n.");
         result = false;
         goto done;
     }
     snprintf(modelName, kNameLenght, "Realtek %s PCIe 5 Gbit Ethernet", rtl_chip_info[linuxData.chipset].name);
     setProperty("model", modelName);
-    
+
     DebugLog("ZRTL8126: configureInterface() <===\n");
 
 done:
@@ -703,18 +708,18 @@ done:
 bool ZRTL8126::createWorkLoop()
 {
     DebugLog("ZRTL8126: createWorkLoop() ===>\n");
-    
+
     workLoop = IOWorkLoop::workLoop();
-    
+
     DebugLog("ZRTL8126: createWorkLoop() <===\n");
 
     return workLoop ? true : false;
 }
 
-IOWorkLoop* ZRTL8126::getWorkLoop() const
+IOWorkLoop *ZRTL8126::getWorkLoop() const
 {
     DebugLog("ZRTL8126: getWorkLoop() ===>\n");
-    
+
     DebugLog("ZRTL8126: getWorkLoop() <===\n");
 
     return workLoop;
@@ -724,14 +729,15 @@ IOWorkLoop* ZRTL8126::getWorkLoop() const
 IOReturn ZRTL8126::getHardwareAddress(IOEthernetAddress *addr)
 {
     IOReturn result = kIOReturnError;
-    
+
     DebugLog("ZRTL8126: getHardwareAddress() ===>\n");
-    
-    if (addr) {
+
+    if (addr)
+    {
         bcopy(&currMacAddr.bytes, addr->bytes, kIOEthernetAddressSize);
         result = kIOReturnSuccess;
     }
-    
+
     DebugLog("ZRTL8126: getHardwareAddress() <===\n");
 
     return result;
@@ -745,12 +751,15 @@ IOReturn ZRTL8126::setPromiscuousMode(bool active)
     struct rtl8126_private *tp = &linuxData;
 
     DebugLog("ZRTL8126: setPromiscuousMode() ===>\n");
-    
-    if (active) {
+
+    if (active)
+    {
         DebugLog("ZRTL8126: Promiscuous mode enabled.\n");
         rxMode = (AcceptBroadcast | AcceptMulticast | AcceptMyPhys | AcceptAllPhys);
         mcFilter[1] = mcFilter[0] = 0xffffffff;
-    } else {
+    }
+    else
+    {
         DebugLog("ZRTL8126: Promiscuous mode disabled.\n");
         rxMode = (AcceptBroadcast | AcceptMulticast | AcceptMyPhys);
         mcFilter[0] = *filterAddr++;
@@ -778,14 +787,16 @@ IOReturn ZRTL8126::setMulticastMode(bool active)
     UInt32 rxMode;
     struct rtl8126_private *tp = &linuxData;
 
-
     DebugLog("ZRTL8126: setMulticastMode() ===>\n");
-    
-    if (active) {
+
+    if (active)
+    {
         rxMode = (AcceptBroadcast | AcceptMulticast | AcceptMyPhys);
         mcFilter[0] = *filterAddr++;
         mcFilter[1] = *filterAddr;
-    } else{
+    }
+    else
+    {
         rxMode = (AcceptBroadcast | AcceptMyPhys);
         mcFilter[1] = mcFilter[0] = 0;
     }
@@ -793,14 +804,14 @@ IOReturn ZRTL8126::setMulticastMode(bool active)
     WriteReg32(RxConfig, rxMode);
     WriteReg32(MAR0, mcFilter[0]);
     WriteReg32(MAR1, mcFilter[1]);
-    
+
     if (active)
         set_bit(__M_CAST, &stateFlags);
     else
         clear_bit(__M_CAST, &stateFlags);
 
     DebugLog("ZRTL8126: setMulticastMode() <===\n");
-    
+
     return kIOReturnSuccess;
 }
 
@@ -809,16 +820,20 @@ IOReturn ZRTL8126::setMulticastList(IOEthernetAddress *addrs, UInt32 count)
     UInt32 *filterAddr = (UInt32 *)&multicastFilter;
     UInt64 filter = 0;
     UInt32 i, bitNumber;
-    
+
     DebugLog("ZRTL8126: setMulticastList() ===>\n");
-    
-    if (count <= kMCFilterLimit) {
-        for (i = 0; i < count; i++, addrs++) {
+
+    if (count <= kMCFilterLimit)
+    {
+        for (i = 0; i < count; i++, addrs++)
+        {
             bitNumber = ether_crc(6, reinterpret_cast<unsigned char *>(addrs)) >> 26;
             filter |= (1 << (bitNumber & 0x3f));
         }
         multicastFilter = OSSwapInt64(filter);
-    } else {
+    }
+    else
+    {
         multicastFilter = 0xffffffffffffffff;
     }
     WriteReg32(MAR0, *filterAddr++);
@@ -835,10 +850,14 @@ IOReturn ZRTL8126::getChecksumSupport(UInt32 *checksumMask, UInt32 checksumFamil
 
     DebugLog("ZRTL8126: getChecksumSupport() ===>\n");
 
-    if ((checksumFamily == kChecksumFamilyTCPIP) && checksumMask) {
-        if (isOutput) {
+    if ((checksumFamily == kChecksumFamilyTCPIP) && checksumMask)
+    {
+        if (isOutput)
+        {
             *checksumMask = (enableCSO6) ? (kChecksumTCP | kChecksumUDP | kChecksumIP | kChecksumTCPIPv6 | kChecksumUDPIPv6) : (kChecksumTCP | kChecksumUDP | kChecksumIP);
-        } else {
+        }
+        else
+        {
             *checksumMask = (kChecksumTCP | kChecksumUDP | kChecksumIP | kChecksumTCPIPv6 | kChecksumUDPIPv6);
         }
         result = kIOReturnSuccess;
@@ -851,17 +870,17 @@ IOReturn ZRTL8126::getChecksumSupport(UInt32 *checksumMask, UInt32 checksumFamil
 UInt32 ZRTL8126::getFeatures() const
 {
     UInt32 features = (kIONetworkFeatureMultiPages | kIONetworkFeatureHardwareVlan);
-    
+
     DebugLog("ZRTL8126: getFeatures() ===>\n");
-    
+
     if (enableTSO4)
         features |= kIONetworkFeatureTSOIPv4;
-    
+
     if (enableTSO6)
         features |= kIONetworkFeatureTSOIPv6;
-    
+
     DebugLog("ZRTL8126: getFeatures() <===\n");
-    
+
     return features;
 }
 
@@ -871,15 +890,16 @@ IOReturn ZRTL8126::setWakeOnMagicPacket(bool active)
 
     DebugLog("ZRTL8126: setWakeOnMagicPacket() ===>\n");
 
-    if (wolCapable) {
+    if (wolCapable)
+    {
         linuxData.wol_enabled = active ? WOL_ENABLED : WOL_DISABLED;
         wolActive = active;
-        
+
         DebugLog("ZRTL8126: WakeOnMagicPacket %s.\n", active ? "enabled" : "disabled");
 
         result = kIOReturnSuccess;
     }
-    
+
     DebugLog("ZRTL8126: setWakeOnMagicPacket() <===\n");
 
     return result;
@@ -891,10 +911,13 @@ IOReturn ZRTL8126::getPacketFilters(const OSSymbol *group, UInt32 *filters) cons
 
     DebugLog("ZRTL8126: getPacketFilters() ===>\n");
 
-    if ((group == gIOEthernetWakeOnLANFilterGroup) && wolCapable) {
+    if ((group == gIOEthernetWakeOnLANFilterGroup) && wolCapable)
+    {
         *filters = kIOEthernetWakeOnMagicPacket;
         DebugLog("ZRTL8126: kIOEthernetWakeOnMagicPacket added to filters.\n");
-    } else {
+    }
+    else
+    {
         result = super::getPacketFilters(group, filters);
     }
     DebugLog("ZRTL8126: getPacketFilters() <===\n");
@@ -905,148 +928,154 @@ IOReturn ZRTL8126::getPacketFilters(const OSSymbol *group, UInt32 *filters) cons
 IOReturn ZRTL8126::setHardwareAddress(const IOEthernetAddress *addr)
 {
     IOReturn result = kIOReturnError;
-    
+
     DebugLog("ZRTL8126: setHardwareAddress() ===>\n");
-    
-    if (addr) {
+
+    if (addr)
+    {
         bcopy(addr->bytes, &currMacAddr.bytes, kIOEthernetAddressSize);
         rtl8126_rar_set(&linuxData, (UInt8 *)&currMacAddr.bytes);
         result = kIOReturnSuccess;
     }
-    
+
     DebugLog("ZRTL8126: setHardwareAddress() <===\n");
-    
+
     return result;
 }
 
 IOReturn ZRTL8126::selectMedium(const IONetworkMedium *medium)
 {
     IOReturn result = kIOReturnSuccess;
-    
+
     DebugLog("ZRTL8126: selectMedium() ===>\n");
-    
-    if (medium) {
+
+    if (medium)
+    {
         autoneg = AUTONEG_DISABLE;
         flowCtl = kFlowControlOff;
         linuxData.eee_adv_t = 0;
-        
-        switch (medium->getIndex()) {
-            case MEDIUM_INDEX_AUTO:
-                autoneg = AUTONEG_ENABLE;
-                speed = 0;
-                duplex = DUPLEX_FULL;
-                //linuxData.eee_adv_t = eeeCap;
-                break;
-                
-            case MEDIUM_INDEX_10HD:
-                speed = SPEED_10;
-                duplex = DUPLEX_HALF;
-                break;
-                
-            case MEDIUM_INDEX_10FD:
-                speed = SPEED_10;
-                duplex = DUPLEX_FULL;
-                break;
-                
-            case MEDIUM_INDEX_100HD:
-                speed = SPEED_100;
-                duplex = DUPLEX_HALF;
-                break;
-                
-            case MEDIUM_INDEX_100FD:
-                speed = SPEED_100;
-                duplex = DUPLEX_FULL;
-                break;
-                
-            case MEDIUM_INDEX_100FDFC:
-                speed = SPEED_100;
-                duplex = DUPLEX_FULL;
-                flowCtl = kFlowControlOn;
-                break;
-                
-            case MEDIUM_INDEX_1000FD:
-                speed = SPEED_1000;
-                duplex = DUPLEX_FULL;
-                break;
-                
-            case MEDIUM_INDEX_1000FDFC:
-                speed = SPEED_1000;
-                duplex = DUPLEX_FULL;
-                flowCtl = kFlowControlOn;
-                break;
-                
-            case MEDIUM_INDEX_100FDEEE:
-                speed = SPEED_100;
-                duplex = DUPLEX_FULL;
-                linuxData.eee_adv_t = eeeCap;
-                break;
-                
-            case MEDIUM_INDEX_100FDFCEEE:
-                speed = SPEED_100;
-                duplex = DUPLEX_FULL;
-                flowCtl = kFlowControlOn;
-                linuxData.eee_adv_t = eeeCap;
-                break;
-                
-            case MEDIUM_INDEX_1000FDEEE:
-                speed = SPEED_1000;
-                duplex = DUPLEX_FULL;
-                linuxData.eee_adv_t = eeeCap;
-                break;
-                
-            case MEDIUM_INDEX_1000FDFCEEE:
-                speed = SPEED_1000;
-                duplex = DUPLEX_FULL;
-                flowCtl = kFlowControlOn;
-                linuxData.eee_adv_t = eeeCap;
-                break;
-                
-            case MEDIUM_INDEX_2500FD:
-                speed = SPEED_2500;
-                duplex = DUPLEX_FULL;
-                break;
-                
-            case MEDIUM_INDEX_2500FDFC:
-                speed = SPEED_2500;
-                duplex = DUPLEX_FULL;
-                flowCtl = kFlowControlOn;
-                break;
-                
-            case MEDIUM_INDEX_5000FD:
-                speed = SPEED_5000;
-                duplex = DUPLEX_FULL;
-                break;
-                
-            case MEDIUM_INDEX_5000FDFC:
-                speed = SPEED_5000;
-                duplex = DUPLEX_FULL;
-                flowCtl = kFlowControlOn;
-                break;
+
+        switch (medium->getIndex())
+        {
+        case MEDIUM_INDEX_AUTO:
+            autoneg = AUTONEG_ENABLE;
+            speed = 0;
+            duplex = DUPLEX_FULL;
+            // linuxData.eee_adv_t = eeeCap;
+            break;
+
+        case MEDIUM_INDEX_10HD:
+            speed = SPEED_10;
+            duplex = DUPLEX_HALF;
+            break;
+
+        case MEDIUM_INDEX_10FD:
+            speed = SPEED_10;
+            duplex = DUPLEX_FULL;
+            break;
+
+        case MEDIUM_INDEX_100HD:
+            speed = SPEED_100;
+            duplex = DUPLEX_HALF;
+            break;
+
+        case MEDIUM_INDEX_100FD:
+            speed = SPEED_100;
+            duplex = DUPLEX_FULL;
+            break;
+
+        case MEDIUM_INDEX_100FDFC:
+            speed = SPEED_100;
+            duplex = DUPLEX_FULL;
+            flowCtl = kFlowControlOn;
+            break;
+
+        case MEDIUM_INDEX_1000FD:
+            speed = SPEED_1000;
+            duplex = DUPLEX_FULL;
+            break;
+
+        case MEDIUM_INDEX_1000FDFC:
+            speed = SPEED_1000;
+            duplex = DUPLEX_FULL;
+            flowCtl = kFlowControlOn;
+            break;
+
+        case MEDIUM_INDEX_100FDEEE:
+            speed = SPEED_100;
+            duplex = DUPLEX_FULL;
+            linuxData.eee_adv_t = eeeCap;
+            break;
+
+        case MEDIUM_INDEX_100FDFCEEE:
+            speed = SPEED_100;
+            duplex = DUPLEX_FULL;
+            flowCtl = kFlowControlOn;
+            linuxData.eee_adv_t = eeeCap;
+            break;
+
+        case MEDIUM_INDEX_1000FDEEE:
+            speed = SPEED_1000;
+            duplex = DUPLEX_FULL;
+            linuxData.eee_adv_t = eeeCap;
+            break;
+
+        case MEDIUM_INDEX_1000FDFCEEE:
+            speed = SPEED_1000;
+            duplex = DUPLEX_FULL;
+            flowCtl = kFlowControlOn;
+            linuxData.eee_adv_t = eeeCap;
+            break;
+
+        case MEDIUM_INDEX_2500FD:
+            speed = SPEED_2500;
+            duplex = DUPLEX_FULL;
+            break;
+
+        case MEDIUM_INDEX_2500FDFC:
+            speed = SPEED_2500;
+            duplex = DUPLEX_FULL;
+            flowCtl = kFlowControlOn;
+            break;
+
+        case MEDIUM_INDEX_5000FD:
+            speed = SPEED_5000;
+            duplex = DUPLEX_FULL;
+            break;
+
+        case MEDIUM_INDEX_5000FDFC:
+            speed = SPEED_5000;
+            duplex = DUPLEX_FULL;
+            flowCtl = kFlowControlOn;
+            break;
         }
-        //setPhyMedium();
+        // setPhyMedium();
         setCurrentMedium(medium);
         setLinkDown();
     }
-    
+
     DebugLog("ZRTL8126: selectMedium() <===\n");
-    
+
 done:
     return result;
 }
 
-#pragma mark --- jumbo frame support methods ---
+#pragma mark--- jumbo frame support methods ---
 
-IOReturn ZRTL8126::getMaxPacketSize(UInt32 * maxSize) const
+IOReturn ZRTL8126::getMaxPacketSize(UInt32 *maxSize) const
 {
     DebugLog("ZRTL8126: getMaxPacketSize() ===>\n");
-        
-    if (version_major >= 22) {
+
+    if (version_major >= 22)
+    {
         /*
          * Starting with Ventura we can be honest about jumbo
          * frame support.
          */
         *maxSize = rxBufferSize - 2;
-    } else {
+    }
+    else
+    {
         /*
          * In case we reported a maximum packet size below 9018
          * the network preferences panel wouldn't allow the user
@@ -1061,7 +1090,7 @@ IOReturn ZRTL8126::getMaxPacketSize(UInt32 * maxSize) const
     DebugLog("ZRTL8126: maxSize: %u, version_major: %u\n", *maxSize, version_major);
 
     DebugLog("ZRTL8126: getMaxPacketSize() <===\n");
-    
+
     return kIOReturnSuccess;
 }
 
@@ -1073,14 +1102,15 @@ IOReturn ZRTL8126::setMaxPacketSize(UInt32 maxSize)
     IOReturn result = kIOReturnError;
 
     DebugLog("ZRTL8126: setMaxPacketSize() ===>\n");
-    
-    if (maxSize <= (rxBufferSize - 2)) {
+
+    if (maxSize <= (rxBufferSize - 2))
+    {
         mtu = maxSize - (ETH_HLEN + ETH_FCS_LEN);
         DebugLog("ZRTL8126: maxSize: %u, mtu: %u\n", maxSize, mtu);
-        
+
         if (enableTSO4)
             mask |= IFNET_TSO_IPV4;
-        
+
         if (enableTSO6)
             mask |= IFNET_TSO_IPV6;
 
@@ -1088,11 +1118,14 @@ IOReturn ZRTL8126::setMaxPacketSize(UInt32 maxSize)
             mask |= (IFNET_CSUM_TCPIPV6 | IFNET_CSUM_UDPIPV6);
 
         offload = ifnet_offload(ifnet);
-        
-        if (mtu > MSS_MAX) {
+
+        if (mtu > MSS_MAX)
+        {
             offload &= ~mask;
             DebugLog("ZRTL8126: Disable hardware offload features: %x!\n", mask);
-        } else {
+        }
+        else
+        {
             offload |= mask;
             DebugLog("ZRTL8126: Enable hardware offload features: %x!\n", mask);
         }
@@ -1102,29 +1135,29 @@ IOReturn ZRTL8126::setMaxPacketSize(UInt32 maxSize)
         setLinkDown();
         timerSource->cancelTimeout();
         restartRTL8126();
-        
+
         result = kIOReturnSuccess;
     }
-    
+
     DebugLog("ZRTL8126: setMaxPacketSize() <===\n");
-    
+
     return result;
 }
 
-#pragma mark --- common interrupt methods ---
+#pragma mark--- common interrupt methods ---
 
 void ZRTL8126::pciErrorInterrupt()
 {
     UInt16 cmdReg = pciDevice->configRead16(kIOPCIConfigCommand);
     UInt16 statusReg = pciDevice->configRead16(kIOPCIConfigStatus);
-    
+
     DebugLog("ZRTL8126: PCI error: cmdReg=0x%x, statusReg=0x%x\n", cmdReg, statusReg);
 
     cmdReg |= (kIOPCICommandSERR | kIOPCICommandParityError);
     statusReg &= (kIOPCIStatusParityErrActive | kIOPCIStatusSERRActive | kIOPCIStatusMasterAbortActive | kIOPCIStatusTargetAbortActive | kIOPCIStatusTargetAbortCapable);
     pciDevice->configWrite16(kIOPCIConfigCommand, cmdReg);
     pciDevice->configWrite16(kIOPCIConfigStatus, statusReg);
-    
+
     /* Reset the NIC in order to resume operation. */
     restartRTL8126();
 }
@@ -1132,19 +1165,19 @@ void ZRTL8126::pciErrorInterrupt()
 void ZRTL8126::txInterrupt()
 {
     mbuf_t m;
-    UInt32 nextClosePtr =  ReadReg32(HW_CLO_PTR0_8126);
+    UInt32 nextClosePtr = ReadReg32(HW_CLO_PTR0_8126);
     UInt32 oldDirtyIndex = txDirtyDescIndex;
     UInt32 numDone;
     struct rtl8126_private *tp = &linuxData;
 
+    numDone = (nextClosePtr - txClosePtr0) & tp->MaxTxDescPtrMask;
 
-    numDone = (nextClosePtr - txClosePtr0)&tp->MaxTxDescPtrMask;
-        
     txClosePtr0 = nextClosePtr;
-    
+
     // IOLog("ZRTL8126: nextClosePtr: %x!numDone: %x!\n", nextClosePtr,numDone);
 
-    while (numDone-- > 0) {
+    while (numDone-- > 0)
+    {
         m = txMbufArray[txDirtyDescIndex];
         txMbufArray[txDirtyDescIndex] = NULL;
 
@@ -1155,19 +1188,20 @@ void ZRTL8126::txInterrupt()
         OSIncrementAtomic(&txNumFreeDesc);
         ++txDirtyDescIndex &= kTxDescMask;
     }
-    if (oldDirtyIndex != txDirtyDescIndex) {
+    if (oldDirtyIndex != txDirtyDescIndex)
+    {
         if (txNumFreeDesc > kTxQueueWakeTreshhold)
             netif->signalOutputThread();
-        
+
         releaseFreePackets();
     }
 }
 
-UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context,rtl8126_rx_ring *ring)
+UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context, rtl8126_rx_ring *ring)
 {
     IOPhysicalSegment rxSegment;
     UInt32 localIdx = ring->rxNextDescIndex;
-    RxDesc *desc = &ring->rxDescArray[localIdx];    
+    RtlRxDesc *desc;
     mbuf_t bufPkt, newPkt;
     UInt64 addr;
     UInt32 opts1, opts2;
@@ -1177,26 +1211,28 @@ UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, I
     bool replaced;
     struct rtl8126_private *tp = &linuxData;
 
-    
-    RxDesc *desc = (RxDesc*)((UInt8*)ring->rxDescArray + (localIdx * tp->RxDescLength));
-    
-    while (!((descStatus1 = OSSwapLittleToHostInt32(desc->opts1)) & DescOwn) && (goodPkts < maxCount)) {
+    desc = getDescriptor(ring->rxDescArray, localIdx, tp->RxDescLength);
+
+    while (!((descStatus1 = OSSwapLittleToHostInt32(desc->opts1)) & DescOwn) && (goodPkts < maxCount))
+    {
         opts1 = (localIdx == (ring->num_rx_desc - 1)) ? (RingEnd | DescOwn) : DescOwn;
         opts2 = 0;
         addr = 0;
-        
+
         /* As we don't support fragmented packets we treat them as errors. */
-        if (unlikely((descStatus1 & (FirstFrag|LastFrag)) != (FirstFrag|LastFrag))) {
+        if (unlikely((descStatus1 & (FirstFrag | LastFrag)) != (FirstFrag | LastFrag)))
+        {
             DebugLog("ZRTL8126: Fragmented packet.\n");
             etherStats->dot3StatsEntry.frameTooLongs++;
             opts1 |= rxBufferSize;
             goto nextDesc;
         }
-        
+
         /* Drop packets with receive errors. */
-        if (unlikely(descStatus1 & RxRES)) {
+        if (unlikely(descStatus1 & RxRES))
+        {
             DebugLog("ZRTL8126: Rx error.\n");
-            
+
             if (descStatus1 & (RxRWT | RxRUNT))
                 etherStats->dot3StatsEntry.frameTooLongs++;
 
@@ -1206,20 +1242,22 @@ UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, I
             opts1 |= rxBufferSize;
             goto nextDesc;
         }
-        
+
         descStatus2 = OSSwapLittleToHostInt32(desc->opts2);
         pktSize = (descStatus1 & 0x1fff) - kIOEthernetCRCSize;
         bufPkt = rxMbufArray[rxNextDescIndex];
         DebugLog("ZRTL8126: rxInterrupt(): descStatus1=0x%x, descStatus2=0x%x, pktSize=%u\n", descStatus1, descStatus2, pktSize);
-        
+
         newPkt = replaceOrCopyPacket(&bufPkt, pktSize, &replaced);
-        
-        if (unlikely(!newPkt)) {
+
+        if (unlikely(!newPkt))
+        {
             /*
              * Allocation of a new packet failed. Try to get
              * a replacement from the list of spare packets.
              */
-            if (spareNum > 1) {
+            if (spareNum > 1)
+            {
                 DebugLog("ZRTL8126: Use spare packet to replace buffer (%d available).\n", spareNum);
                 OSDecrementAtomic(&spareNum);
 
@@ -1240,10 +1278,12 @@ UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, I
             opts1 |= rxBufferSize;
             goto nextDesc;
         }
-handle_pkt:
+    handle_pkt:
         /* If the packet was replaced we have to update the descriptor's buffer address. */
-        if (replaced) {
-            if (rxMbufCursor->getPhysicalSegments(bufPkt, &rxSegment, 1) != 1) {
+        if (replaced)
+        {
+            if (rxMbufCursor->getPhysicalSegments(bufPkt, &rxSegment, 1) != 1)
+            {
                 DebugLog("ZRTL8126: getPhysicalSegments() failed.\n");
                 etherStats->dot3RxExtraEntry.resourceErrors++;
                 freePacket(bufPkt);
@@ -1253,7 +1293,9 @@ handle_pkt:
             opts1 |= ((UInt32)rxSegment.length & 0x0000ffff);
             addr = rxSegment.location;
             rxMbufArray[rxNextDescIndex] = bufPkt;
-        } else {
+        }
+        else
+        {
             opts1 |= rxBufferSize;
         }
         /* Set the length of the buffer. */
@@ -1268,15 +1310,15 @@ handle_pkt:
         mbuf_pkthdr_setlen(newPkt, pktSize);
         interface->enqueueInputPacket(newPkt, pollQueue);
         goodPkts++;
-        
+
         /* Finally update the descriptor and get the next one to examine. */
     nextDesc:
         if (addr)
             desc->addr = OSSwapHostToLittleInt64(addr);
-        
+
         desc->opts2 = OSSwapHostToLittleInt32(opts2);
         desc->opts1 = OSSwapHostToLittleInt32(opts1);
-        
+
         ++rxNextDescIndex &= kRxDescMask;
         desc = &rxDescArray[rxNextDescIndex];
     }
@@ -1287,68 +1329,90 @@ void ZRTL8126::checkLinkStatus()
 {
     struct rtl8126_private *tp = &linuxData;
     UInt16 currLinkState;
-    
+
     DebugLog("ZRTL8126: Link change interrupt: Check link status.\n");
 
     currLinkState = ReadReg32(PHYstatus);
-    
-    if (currLinkState & LinkStatus) {
+
+    if (currLinkState & LinkStatus)
+    {
         /* Get EEE mode. */
         eeeMode = getEEEMode();
-        
+
         /* Get link speed, duplex and flow-control mode. */
-        if (currLinkState & (TxFlowCtrl | RxFlowCtrl)) {
+        if (currLinkState & (TxFlowCtrl | RxFlowCtrl))
+        {
             flowCtl = kFlowControlOn;
-        } else {
+        }
+        else
+        {
             flowCtl = kFlowControlOff;
         }
-        if (currLinkState & _5000bpsF) {
+        if (currLinkState & _5000bpsF)
+        {
             speed = SPEED_5000;
             duplex = DUPLEX_FULL;
-        } else if (currLinkState & _2500bpsF) {
+        }
+        else if (currLinkState & _2500bpsF)
+        {
             speed = SPEED_2500;
             duplex = DUPLEX_FULL;
-        } else if (currLinkState & _1000bpsF) {
-                speed = SPEED_1000;
-                duplex = DUPLEX_FULL;
-        } else if (currLinkState & _100bps) {
+        }
+        else if (currLinkState & _1000bpsF)
+        {
+            speed = SPEED_1000;
+            duplex = DUPLEX_FULL;
+        }
+        else if (currLinkState & _100bps)
+        {
             speed = SPEED_100;
-            
-            if (currLinkState & FullDup) {
+
+            if (currLinkState & FullDup)
+            {
                 duplex = DUPLEX_FULL;
-            } else {
+            }
+            else
+            {
                 duplex = DUPLEX_HALF;
             }
-        } else {
+        }
+        else
+        {
             speed = SPEED_10;
-            
-            if (currLinkState & FullDup) {
+
+            if (currLinkState & FullDup)
+            {
                 duplex = DUPLEX_FULL;
-            } else {
+            }
+            else
+            {
                 duplex = DUPLEX_HALF;
             }
         }
         setupRTL8126();
 
-        switch (tp->mcfg) {
+        switch (tp->mcfg)
+        {
         case CFG_METHOD_1:
         case CFG_METHOD_2:
         case CFG_METHOD_3:
-                if (RTL_R8(tp, PHYstatus) & _10bps)
-                        rtl8126_enable_eee_plus(tp);
-                break;
+            if (RTL_R8(tp, PHYstatus) & _10bps)
+                rtl8126_enable_eee_plus(tp);
+            break;
         default:
-                break;
+            break;
         }
 
         setLinkUp();
         timerSource->setTimeoutMS(kTimeoutMS);
-        
+
         rtl8126_mdio_write(tp, 0x1F, 0x0000);
         linuxData.phy_reg_anlpar = rtl8126_mdio_read(tp, MII_LPA);
-    } else {
+    }
+    else
+    {
         tp->phy_reg_anlpar = 0;
-        
+
         rtl8126_disable_eee_plus(tp);
 
         /* Stop watchdog and statistics updates. */
@@ -1361,52 +1425,61 @@ void ZRTL8126::interruptHandler(OSObject *client, IOInterruptEventSource *src, i
 {
     UInt32 packets;
     UInt32 status;
-    
+
+    DebugLog("ZRTL8126: interruptHandler:, getIntIndex=0x%x,", src->getIntIndex());
+
     status = ReadReg32(ISR0_8125);
-    
+
     // DebugLog("ZRTL8126: interruptHandler: status = 0x%x.\n", status);
 
     /* hotplug/major error/no more work/shared irq */
     if ((status == 0xFFFFFFFF) || !status)
         goto done;
-    
+
     WriteReg32(IMR0_8125, 0x0000);
-    WriteReg32(ISR0_8125, (status&~RxFIFOOver));
+    WriteReg32(ISR0_8125, (status & ~RxFIFOOver));
 
     DebugLog("ZRTL8126: interruptHandler:, ISR0=0x%x, IMR0=0x%x, polling=%u.\n", ReadReg32(ISR0_8125),
-                     ReadReg32(IMR0_8125), test_bit(__POLL_MODE, &stateFlags));
-    if (status & SYSErr) {
+             ReadReg32(IMR0_8125), test_bit(__POLL_MODE, &stateFlags));
+    if (status & SYSErr)
+    {
         pciErrorInterrupt();
         goto done;
     }
     if (!test_bit(__POLL_MODE, &stateFlags) &&
-        !test_and_set_bit(__POLLING, &stateFlags)) {
+        !test_and_set_bit(__POLLING, &stateFlags))
+    {
         // UInt32 rxStatusMask = RxOK | RxDescUnavail | ISRIMR_V2_ROK_Q0 | (ISRIMR_V2_ROK_Q0 << 1) | (ISRIMR_V2_ROK_Q0 << 2) | (ISRIMR_V2_ROK_Q0 << 3);
         // UInt32 txStatusMask = TxOK | ISRIMR_TOK_Q0 | ISRIMR_TOK_Q1;
         /* Rx interrupt */
-        if (status & (RxOK | RxDescUnavail | RxFIFOOver)) {
-            packets = rxInterrupt(netif, kNumRxDesc, NULL, NULL);
-            
-            if (packets)
-                netif->flushInputQueue();
-            
+        if (status & (RxOK | RxDescUnavail | RxFIFOOver))
+        {
+//            packets = rxInterrupt(netif, kNumRxDesc, NULL, NULL,NULL);
+//
+//            if (packets)
+//                netif->flushInputQueue();
+
             etherStats->dot3RxExtraEntry.interrupts++;
-            
+
             if (spareNum < kRxNumSpareMbufs)
                 refillSpareBuffers();
         }
         /* Tx interrupt */
-        if (status & (TxOK | RxOK | PCSTimeout)) {
+        if (status & (TxOK | RxOK | PCSTimeout))
+        {
             txInterrupt();
-            
+
             if (status & TxOK)
                 etherStats->dot3TxExtraEntry.interrupts++;
         }
-        if (status & (TxOK | RxOK)) {
+        if (status & (TxOK | RxOK))
+        {
             WriteReg32(TIMER_INT0_8125, 0x2600);
             WriteReg32(TCTR0_8125, 0x2600);
             intrMask = intrMaskTimer;
-        } else if (status & PCSTimeout) {
+        }
+        else if (status & PCSTimeout)
+        {
             WriteReg32(TIMER_INT0_8125, 0x0000);
             intrMask = intrMaskRxTx;
         }
@@ -1414,11 +1487,12 @@ void ZRTL8126::interruptHandler(OSObject *client, IOInterruptEventSource *src, i
         if (status & PCSTimeout)
             tmrInterrupts++;
 #endif
-        
+
         clear_bit(__POLLING, &stateFlags);
     }
-     /* Tx (LinkChg | ISRIMR_V2_LINKCHG) */
-    if (status & LinkChg) {
+    /* Tx (LinkChg | ISRIMR_V2_LINKCHG) */
+    if (status & LinkChg)
+    {
         checkLinkStatus();
         WriteReg32(TIMER_INT0_8125, 0x000);
         intrMask = intrMaskRxTx;
@@ -1427,13 +1501,14 @@ done:
     WriteReg32(IMR0_8125, intrMask);
 }
 
-
 bool ZRTL8126::txHangCheck()
 {
     bool deadlock = false;
-    
-    if ((txDescDoneCount == txDescDoneLast) && (txNumFreeDesc < kNumTxDesc)) {
-        if (++deadlockWarn == kTxCheckTreshhold) {
+
+    if ((txDescDoneCount == txDescDoneLast) && (txNumFreeDesc < kNumTxDesc))
+    {
+        if (++deadlockWarn == kTxCheckTreshhold)
+        {
             /* Some members of the RTL8125 family seem to be prone to lose transmitter rinterrupts.
              * In order to avoid false positives when trying to detect transmitter deadlocks, check
              * the transmitter ring once for completed descriptors before we assume a deadlock.
@@ -1442,11 +1517,14 @@ bool ZRTL8126::txHangCheck()
                      ReadReg32(IMR0_8125), test_bit(__POLL_MODE, &stateFlags));
             etherStats->dot3TxExtraEntry.timeouts++;
             txInterrupt();
-        } else if (deadlockWarn >= kTxDeadlockTreshhold) {
+        }
+        else if (deadlockWarn >= kTxDeadlockTreshhold)
+        {
 #ifdef DEBUG
             UInt32 i, index;
-            
-            for (i = 0; i < 10; i++) {
+
+            for (i = 0; i < 10; i++)
+            {
                 index = ((txDirtyDescIndex - 1 + i) & kTxDescMask);
                 IOLog("ZRTL8126: desc[%u]: opts1=0x%x, opts2=0x%x, addr=0x%llx.\n", index,
                       txDescArray[index].opts1, txDescArray[index].opts2, txDescArray[index].addr);
@@ -1458,24 +1536,30 @@ bool ZRTL8126::txHangCheck()
             restartRTL8126();
             deadlock = true;
         }
-    } else {
+    }
+    else
+    {
         deadlockWarn = 0;
     }
     return deadlock;
 }
 
-#pragma mark --- rx poll methods ---
+#pragma mark--- rx poll methods ---
 
 IOReturn ZRTL8126::setInputPacketPollingEnable(IONetworkInterface *interface, bool enabled)
 {
-    //DebugLog("ZRTL8126: setInputPacketPollingEnable() ===>\n");
+    // DebugLog("ZRTL8126: setInputPacketPollingEnable() ===>\n");
 
-    if (test_bit(__ENABLED, &stateFlags)) {
-        if (enabled) {
+    if (test_bit(__ENABLED, &stateFlags))
+    {
+        if (enabled)
+        {
             set_bit(__POLL_MODE, &stateFlags);
 
             intrMask = intrMaskPoll;
-        } else {
+        }
+        else
+        {
             clear_bit(__POLL_MODE, &stateFlags);
 
             intrMask = intrMaskRxTx;
@@ -1484,32 +1568,37 @@ IOReturn ZRTL8126::setInputPacketPollingEnable(IONetworkInterface *interface, bo
     }
     DebugLog("ZRTL8126: Input polling %s.\n", enabled ? "enabled" : "disabled");
 
-    //DebugLog("ZRTL8126: setInputPacketPollingEnable() <===\n");
-    
+    // DebugLog("ZRTL8126: setInputPacketPollingEnable() <===\n");
+
     return kIOReturnSuccess;
 }
 
-void ZRTL8126::pollInputPackets(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context )
+void ZRTL8126::pollInputPackets(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context)
 {
     DebugLog("ZRTL8126: pollInputPackets() ===>\n");
-    
-    if (test_bit(__POLL_MODE, &stateFlags) &&
-        !test_and_set_bit(__POLLING, &stateFlags)) {
 
-        rxInterrupt(interface, maxCount, pollQueue, context);
-        
+    if (test_bit(__POLL_MODE, &stateFlags) &&
+        !test_and_set_bit(__POLLING, &stateFlags))
+    {
+
+        rxInterrupt(interface, maxCount, pollQueue, context,NULL);
+
         /* Finally cleanup the transmitter ring. */
         txInterrupt();
-        
+
         clear_bit(__POLLING, &stateFlags);
-        
+
         if (spareNum < kRxNumSpareMbufs)
             commandGate->runAction(refillAction);
     }
-    //DebugLog("ZRTL8126: pollInputPackets() <===\n");
+    // DebugLog("ZRTL8126: pollInputPackets() <===\n");
 }
 
-#pragma mark --- hardware specific methods ---
+#pragma mark--- hardware specific methods ---
+
+inline RtlRxDesc* getDescriptor(void* base, UInt32 index, UInt32 stride) {
+    return (RtlRxDesc*)((UInt8*)base + (index * stride));
+}
 
 inline void ZRTL8126::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2)
 {
@@ -1520,7 +1609,8 @@ inline void ZRTL8126::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2
         performed |= (MBUF_CSUM_DID_IP | MBUF_CSUM_IP_GOOD);
 
     if (((status1 & RxTCPT) && !(status1 & RxTCPF)) ||
-        ((status1 & RxUDPT) && !(status1 & RxUDPF))) {
+        ((status1 & RxUDPT) && !(status1 & RxUDPF)))
+    {
         performed |= (MBUF_CSUM_DID_DATA | MBUF_CSUM_PSEUDO_HDR);
         value = 0xffff; // fake a valid checksum value
     }
@@ -1538,10 +1628,9 @@ static const char *duplexHalfName = "half-duplex";
 static const char *offFlowName = "no flow-control";
 static const char *onFlowName = "flow-control";
 
-static const char* eeeNames[kEEETypeCount] = {
+static const char *eeeNames[kEEETypeCount] = {
     "",
-    ", energy-efficient-ethernet"
-};
+    ", energy-efficient-ethernet"};
 
 void ZRTL8126::setLinkUp()
 {
@@ -1552,90 +1641,132 @@ void ZRTL8126::setLinkUp()
     const char *duplexName;
     const char *flowName;
     const char *eeeName;
-    
+
     eeeName = eeeNames[kEEETypeNo];
 
     /* Get link speed, duplex and flow-control mode. */
-    if (flowCtl == kFlowControlOn) {
+    if (flowCtl == kFlowControlOn)
+    {
         flowName = onFlowName;
-    } else {
+    }
+    else
+    {
         flowName = offFlowName;
     }
-    
-    if (speed == SPEED_5000) {
+
+    if (speed == SPEED_5000)
+    {
         mediumSpeed = kSpeed5000MBit;
         speedName = speed5GName;
         duplexName = duplexFullName;
-       
-        if (flowCtl == kFlowControlOn) {
+
+        if (flowCtl == kFlowControlOn)
+        {
             mediumIndex = MEDIUM_INDEX_5000FDFC;
-        } else {
+        }
+        else
+        {
             mediumIndex = MEDIUM_INDEX_5000FD;
         }
-    } else if (speed == SPEED_2500) {
+    }
+    else if (speed == SPEED_2500)
+    {
         mediumSpeed = kSpeed2500MBit;
         speedName = speed25GName;
         duplexName = duplexFullName;
-       
-        if (flowCtl == kFlowControlOn) {
+
+        if (flowCtl == kFlowControlOn)
+        {
             mediumIndex = MEDIUM_INDEX_2500FDFC;
-        } else {
+        }
+        else
+        {
             mediumIndex = MEDIUM_INDEX_2500FD;
         }
-    } else if (speed == SPEED_1000) {
+    }
+    else if (speed == SPEED_1000)
+    {
         mediumSpeed = kSpeed1000MBit;
         speedName = speed1GName;
         duplexName = duplexFullName;
-       
-        if (flowCtl == kFlowControlOn) {
-            if (eeeMode & MDIO_EEE_1000T) {
+
+        if (flowCtl == kFlowControlOn)
+        {
+            if (eeeMode & MDIO_EEE_1000T)
+            {
                 mediumIndex = MEDIUM_INDEX_1000FDFCEEE;
                 eeeName = eeeNames[kEEETypeYes];
-            } else {
+            }
+            else
+            {
                 mediumIndex = MEDIUM_INDEX_1000FDFC;
             }
-        } else {
-            if (eeeMode & MDIO_EEE_1000T) {
+        }
+        else
+        {
+            if (eeeMode & MDIO_EEE_1000T)
+            {
                 mediumIndex = MEDIUM_INDEX_1000FDEEE;
                 eeeName = eeeNames[kEEETypeYes];
-            } else {
+            }
+            else
+            {
                 mediumIndex = MEDIUM_INDEX_1000FD;
             }
         }
-    } else if (speed == SPEED_100) {
+    }
+    else if (speed == SPEED_100)
+    {
         mediumSpeed = kSpeed100MBit;
         speedName = speed100MName;
-        
-        if (duplex == DUPLEX_FULL) {
+
+        if (duplex == DUPLEX_FULL)
+        {
             duplexName = duplexFullName;
-            
-            if (flowCtl == kFlowControlOn) {
-                if (eeeMode & MDIO_EEE_100TX) {
-                    mediumIndex =  MEDIUM_INDEX_100FDFCEEE;
+
+            if (flowCtl == kFlowControlOn)
+            {
+                if (eeeMode & MDIO_EEE_100TX)
+                {
+                    mediumIndex = MEDIUM_INDEX_100FDFCEEE;
                     eeeName = eeeNames[kEEETypeYes];
-                } else {
+                }
+                else
+                {
                     mediumIndex = MEDIUM_INDEX_100FDFC;
                 }
-            } else {
-                if (eeeMode & MDIO_EEE_100TX) {
-                    mediumIndex =  MEDIUM_INDEX_100FDEEE;
+            }
+            else
+            {
+                if (eeeMode & MDIO_EEE_100TX)
+                {
+                    mediumIndex = MEDIUM_INDEX_100FDEEE;
                     eeeName = eeeNames[kEEETypeYes];
-                } else {
+                }
+                else
+                {
                     mediumIndex = MEDIUM_INDEX_100FD;
                 }
             }
-        } else {
+        }
+        else
+        {
             mediumIndex = MEDIUM_INDEX_100HD;
             duplexName = duplexHalfName;
         }
-    } else {
+    }
+    else
+    {
         mediumSpeed = kSpeed10MBit;
         speedName = speed10MName;
-        
-        if (duplex == DUPLEX_FULL) {
+
+        if (duplex == DUPLEX_FULL)
+        {
             mediumIndex = MEDIUM_INDEX_10FD;
             duplexName = duplexFullName;
-        } else {
+        }
+        else
+        {
             mediumIndex = MEDIUM_INDEX_10HD;
             duplexName = duplexHalfName;
         }
@@ -1650,27 +1781,30 @@ void ZRTL8126::setLinkUp()
      * update poll params according to link speed.
      */
     bzero(&pParams, sizeof(IONetworkPacketPollingParameters));
-    
-    if (speed == SPEED_10) {
+
+    if (speed == SPEED_10)
+    {
         pParams.lowThresholdPackets = 2;
         pParams.highThresholdPackets = 8;
         pParams.lowThresholdBytes = 0x400;
         pParams.highThresholdBytes = 0x1800;
-        pParams.pollIntervalTime = 1000000;  /* 1ms */
-    } else {
+        pParams.pollIntervalTime = 1000000; /* 1ms */
+    }
+    else
+    {
         pParams.lowThresholdPackets = 10;
         pParams.highThresholdPackets = 40;
         pParams.lowThresholdBytes = 0x1000;
         pParams.highThresholdBytes = 0x10000;
-        
+
         if (speed == SPEED_2500)
             pParams.pollIntervalTime = pollInterval2500;
         else if (speed == SPEED_5000)
             pParams.pollIntervalTime = pollInterval2500;
         else if (speed == SPEED_1000)
-            pParams.pollIntervalTime = 170000;   /* 170µs */
+            pParams.pollIntervalTime = 170000; /* 170µs */
         else
-            pParams.pollIntervalTime = 1000000;  /* 1ms */
+            pParams.pollIntervalTime = 1000000; /* 1ms */
     }
     netif->setPacketPollingParameters(&pParams, 0);
     DebugLog("ZRTL8126: pollIntervalTime: %lluµs\n", (pParams.pollIntervalTime / 1000));
@@ -1697,9 +1831,9 @@ void ZRTL8126::setLinkDown()
 
     /* Cleanup descriptor ring. */
     clearRxTxRings();
-    
+
     setPhyMedium();
-    
+
     IOLog("ZRTL8126: Link down on en%u\n", netif->getUnitNumber());
 }
 
@@ -1709,17 +1843,18 @@ void ZRTL8126::updateStatitics()
     UInt32 cmd;
 
     /* Check if a statistics dump has been completed. */
-    if (needsUpdate && !(ReadReg32(CounterAddrLow) & CounterDump)) {
+    if (needsUpdate && !(ReadReg32(CounterAddrLow) & CounterDump))
+    {
         needsUpdate = false;
         netStats->inputPackets = OSSwapLittleToHostInt64(statData->rxPackets) & 0x00000000ffffffff;
         netStats->inputErrors = OSSwapLittleToHostInt32(statData->rxErrors);
         netStats->outputPackets = OSSwapLittleToHostInt64(statData->txPackets) & 0x00000000ffffffff;
         netStats->outputErrors = OSSwapLittleToHostInt32(statData->txErrors);
-        
+
         sgColl = OSSwapLittleToHostInt32(statData->txOneCollision);
         mlColl = OSSwapLittleToHostInt32(statData->txMultiCollision);
         netStats->collisions = sgColl + mlColl;
-        
+
         etherStats->dot3StatsEntry.singleCollisionFrames = sgColl;
         etherStats->dot3StatsEntry.multipleCollisionFrames = mlColl;
         etherStats->dot3StatsEntry.alignmentErrors = OSSwapLittleToHostInt16(statData->alignErrors);
@@ -1727,7 +1862,8 @@ void ZRTL8126::updateStatitics()
         etherStats->dot3TxExtraEntry.underruns = OSSwapLittleToHostInt16(statData->txUnderun);
     }
     /* Some chips are unable to dump the tally counter while the receiver is disabled. */
-    if (test_bit(__LINK_UP, &stateFlags) && (ReadReg8(ChipCmd) & CmdRxEnb)) {
+    if (test_bit(__LINK_UP, &stateFlags) && (ReadReg8(ChipCmd) & CmdRxEnb))
+    {
         WriteReg32(CounterAddrHigh, (statPhyAddr >> 32));
         cmd = (statPhyAddr & 0x00000000ffffffff);
         WriteReg32(CounterAddrLow, cmd);
@@ -1746,10 +1882,10 @@ void ZRTL8126::timerActionRTL8126(IOTimerEventSource *timer)
     lastRxIntrupts = etherStats->dot3RxExtraEntry.interrupts;
     lastTxIntrupts = etherStats->dot3TxExtraEntry.interrupts;
     lastTmrIntrupts = tmrInterrupts;
-    
+
     DebugLog("ZRTL8126: rxIntr/s: %u, txIntr/s: %u, timerIntr/s: %u\n", rxIntr, txIntr, tmrIntr);
 #endif
-    
+
     updateStatitics();
 
     if (!test_bit(__LINK_UP, &stateFlags))
@@ -1758,15 +1894,14 @@ void ZRTL8126::timerActionRTL8126(IOTimerEventSource *timer)
     /* Check for tx deadlock. */
     if (txHangCheck())
         goto done;
-    
+
     timerSource->setTimeoutMS(kTimeoutMS);
-        
+
 done:
     txDescDoneLast = txDescDoneCount;
-    
 }
 
-#pragma mark --- miscellaneous functions ---
+#pragma mark--- miscellaneous functions ---
 
 static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
 {
@@ -1774,25 +1909,26 @@ static inline void prepareTSO4(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
     struct ip4_hdr_be *ip = (struct ip4_hdr_be *)p;
     struct tcp_hdr_be *tcp;
     UInt32 csum32 = 6;
-    //UInt32 max;
+    // UInt32 max;
     UInt32 i, il, tl;
-    
-    for (i = 0; i < 4; i++) {
+
+    for (i = 0; i < 4; i++)
+    {
         csum32 += ntohs(ip->addr[i]);
         csum32 += (csum32 >> 16);
         csum32 &= 0xffff;
     }
     il = ((ip->hdr_len & 0x0f) << 2);
-    
+
     tcp = (struct tcp_hdr_be *)(p + il);
     tl = ((tcp->dat_off & 0xf0) >> 2);
-    //max = ETH_DATA_LEN - (il + tl);
+    // max = ETH_DATA_LEN - (il + tl);
 
     /* Fill in the pseudo header checksum for TSOv4. */
     tcp->csum = htons((UInt16)csum32);
 
     *tcpOffset = kMacHdrLen + il;
-    
+
     if (*mss > MSS_MAX)
         *mss = MSS_MAX;
 }
@@ -1804,11 +1940,12 @@ static inline void prepareTSO6(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
     struct tcp_hdr_be *tcp;
     UInt32 csum32 = 6;
     UInt32 i, tl;
-    //UInt32 max;
+    // UInt32 max;
 
     ip6->pay_len = 0;
 
-    for (i = 0; i < 16; i++) {
+    for (i = 0; i < 16; i++)
+    {
         csum32 += ntohs(ip6->addr[i]);
         csum32 += (csum32 >> 16);
         csum32 &= 0xffff;
@@ -1816,13 +1953,13 @@ static inline void prepareTSO6(mbuf_t m, UInt32 *tcpOffset, UInt32 *mss)
     /* Get the length of the TCP header. */
     tcp = (struct tcp_hdr_be *)(p + kIPv6HdrLen);
     tl = ((tcp->dat_off & 0xf0) >> 2);
-    //max = ETH_DATA_LEN - (kIPv6HdrLen + tl);
+    // max = ETH_DATA_LEN - (kIPv6HdrLen + tl);
 
     /* Fill in the pseudo header checksum for TSOv6. */
     tcp->csum = htons((UInt16)csum32);
 
     *tcpOffset = kMacHdrLen + kIPv6HdrLen;
-    
+
     if (*mss > MSS_MAX)
         *mss = MSS_MAX;
 }
@@ -1832,15 +1969,16 @@ static unsigned const ethernet_polynomial = 0x04c11db7U;
 static inline u32 ether_crc(int length, unsigned char *data)
 {
     int crc = -1;
-    
-    while(--length >= 0) {
+
+    while (--length >= 0)
+    {
         unsigned char current_octet = *data++;
         int bit;
-        for (bit = 0; bit < 8; bit++, current_octet >>= 1) {
+        for (bit = 0; bit < 8; bit++, current_octet >>= 1)
+        {
             crc = (crc << 1) ^
-            ((crc < 0) ^ (current_octet & 1) ? ethernet_polynomial : 0);
+                  ((crc < 0) ^ (current_octet & 1) ? ethernet_polynomial : 0);
         }
     }
     return crc;
 }
-

@@ -203,7 +203,6 @@ bool ZRTL8126::initRTL8126()
 
         tp->max_jumbo_frame_size = rtl_chip_info[tp->chipset].jumbo_frame_sz;
 
-
         switch (tp->mcfg)
         {
         case CFG_METHOD_1:
@@ -418,9 +417,8 @@ bool ZRTL8126::initRTL8126()
                 tp->HwSuppIsrVer = 1;
                 break;
         }
-    
-        tp->HwCurrIsrVer = tp->HwSuppIsrVer;
 
+        tp->HwCurrIsrVer = tp->HwSuppIsrVer;
 
         // RSS
         switch (tp->mcfg)
@@ -477,38 +475,40 @@ bool ZRTL8126::initRTL8126()
                 break;
         }
 
-         switch (tp->mcfg) {
-         case CFG_METHOD_1:
-                 tp->HwSuppRxDescType = RX_DESC_RING_TYPE_3;
-                 break;
-         case CFG_METHOD_2:
-         case CFG_METHOD_3:
-                 tp->HwSuppRxDescType = RX_DESC_RING_TYPE_4;
-                 break;
-         default:
-                 tp->HwSuppRxDescType = RX_DESC_RING_TYPE_1;
-                 break;
-         }
+        switch (tp->mcfg)
+        {
+        case CFG_METHOD_1:
+                tp->HwSuppRxDescType = RX_DESC_RING_TYPE_3;
+                break;
+        case CFG_METHOD_2:
+        case CFG_METHOD_3:
+                tp->HwSuppRxDescType = RX_DESC_RING_TYPE_4;
+                break;
+        default:
+                tp->HwSuppRxDescType = RX_DESC_RING_TYPE_1;
+                break;
+        }
 
-         tp->InitRxDescType = RX_DESC_RING_TYPE_1;
-         tp->RxDescLength = RX_DESC_LEN_TYPE_1;
+        tp->InitRxDescType = RX_DESC_RING_TYPE_1;
+        tp->RxDescLength = RX_DESC_LEN_TYPE_1;
 
-         switch (tp->HwSuppRxDescType) {
-         case RX_DESC_RING_TYPE_3:
-                         tp->InitRxDescType = RX_DESC_RING_TYPE_3;
-                         tp->RxDescLength = RX_DESC_LEN_TYPE_3;
-                 break;
-         case RX_DESC_RING_TYPE_4:
-                         tp->InitRxDescType = RX_DESC_RING_TYPE_4;
-                         tp->RxDescLength = RX_DESC_LEN_TYPE_4;
-                 break;
-         }
+        switch (tp->HwSuppRxDescType)
+        {
+        case RX_DESC_RING_TYPE_3:
+                tp->InitRxDescType = RX_DESC_RING_TYPE_3;
+                tp->RxDescLength = RX_DESC_LEN_TYPE_3;
+                break;
+        case RX_DESC_RING_TYPE_4:
+                tp->InitRxDescType = RX_DESC_RING_TYPE_4;
+                tp->RxDescLength = RX_DESC_LEN_TYPE_4;
+                break;
+        }
 
-         tp->rtl8126_rx_config = rtl_chip_info[tp->chipset].RCR_Cfg;
-         if (tp->InitRxDescType == RX_DESC_RING_TYPE_3)
-                 tp->rtl8126_rx_config |= EnableRxDescV3;
-         else if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
-                 tp->rtl8126_rx_config &= ~EnableRxDescV4_1;
+        tp->rtl8126_rx_config = rtl_chip_info[tp->chipset].RCR_Cfg;
+        if (tp->InitRxDescType == RX_DESC_RING_TYPE_3)
+                tp->rtl8126_rx_config |= EnableRxDescV3;
+        else if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
+                tp->rtl8126_rx_config &= ~EnableRxDescV4_1;
 
         tp->NicCustLedValue = ReadReg16(CustomLED);
 
@@ -522,6 +522,17 @@ bool ZRTL8126::initRTL8126()
 
         // tp->eee_enabled = eee_enable;
         tp->eee_adv_t = MDIO_EEE_1000T | MDIO_EEE_100TX | SUPPORTED_2500baseX_Full;
+
+        for (i = 0; i < tp->HwSuppIndirTblEntries; i++)
+                tp->rss_indir_tbl[i] = (uint8_t)(i % tp->HwSuppNumRxQueues);
+        static const uint8_t default_key[RTL8126_RSS_KEY_SIZE] = {
+            0x6d, 0x5a, 0x56, 0xda, 0x25, 0x5b, 0x0e, 0xc2,
+            0x41, 0x67, 0x25, 0x3d, 0x43, 0xa3, 0x8f, 0xb0,
+            0xd0, 0xca, 0x2b, 0xcb, 0xae, 0x7b, 0x30, 0xb4,
+            0x77, 0xcb, 0x2d, 0xa3, 0x80, 0x30, 0xf2, 0x0c,
+            0x6a, 0x42, 0xb7, 0x3b, 0xbe, 0xac, 0x01, 0xfa};
+
+        memcpy(tp->rss_key, default_key, sizeof(default_key));
 
         exitOOB();
 
@@ -572,39 +583,45 @@ bool ZRTL8126::initRTL8126()
               origMacAddr.bytes[4], origMacAddr.bytes[5]);
 
         tp->cp_cmd = (ReadReg16(CPlusCmd) | RxChkSum);
-        
-       //mask
-        if (tp->HwCurrIsrVer == 3) {
-                    intrMaskRxTx = ISRIMR_V2_LINKCHG;
-                    for (i = 0; i < tp->HwSuppNumRxQueues; i++)
-                            intrMaskRxTx |= ISRIMR_V2_ROK_Q0 << i;
-            } else if (tp->HwCurrIsrVer == 2) {
+
+        // mask
+        if (tp->HwCurrIsrVer == 3)
+        {
+                intrMaskRxTx = ISRIMR_V2_LINKCHG;
+                for (i = 0; i < tp->HwSuppNumRxQueues; i++)
+                        intrMaskRxTx |= ISRIMR_V2_ROK_Q0 << i;
+        }
+        else if (tp->HwCurrIsrVer == 2)
+        {
                 intrMaskRxTx = ISRIMR_V2_LINKCHG | ISRIMR_TOK_Q0;
-                    if (tp->HwSuppNumTxQueues > 1)
+                if (tp->HwSuppNumTxQueues > 1)
                         intrMaskRxTx |= ISRIMR_TOK_Q1;
 
-                    for (i = 0; i < tp->HwSuppNumRxQueues; i++)
+                for (i = 0; i < tp->HwSuppNumRxQueues; i++)
                         intrMaskRxTx |= ISRIMR_V2_ROK_Q0 << i;
-            } else {
+        }
+        else
+        {
                 intrMaskRxTx = (LinkChg | RxDescUnavail | TxOK | RxOK | SWInt);
                 intrMaskTimer = LinkChg | PCSTimeout;
-            }
-        
+        }
+
         intrMask = intrMaskRxTx;
 
         /* Get the RxConfig parameters. */
         rxConfigReg = tp->rtl8126_rx_config;
         rxConfigMask = rtl_chip_info[tp->chipset].RxConfigMask;
-    
+
         tx_ring[0].tdsar_reg = TxDescStartAddrLow;
         for (i = 1; i < tp->HwSuppNumTxQueues; i++)
-               tx_ring[i].tdsar_reg = (UInt16)(TNPDS_Q1_LOW_8125 + (i - 1) * 8);
+                tx_ring[i].tdsar_reg = (UInt16)(TNPDS_Q1_LOW_8125 + (i - 1) * 8);
 
-        for (i = 0; i < tp->HwSuppNumTxQueues; i++) {
+        for (i = 0; i < tp->HwSuppNumTxQueues; i++)
+        {
                 tx_ring[i].hw_clo_ptr_reg = (UInt16)(HW_CLO_PTR0_8126 + i * 4);
                 tx_ring[i].sw_tail_ptr_reg = (UInt16)(SW_TAIL_PTR0_8126 + i * 4);
-           }
-    //rx
+        }
+        // rx
         rx_ring[0].rdsar_reg = RxDescAddrLow;
         for (i = 1; i < tp->HwSuppNumRxQueues; i++)
                 rx_ring[i].rdsar_reg = (u16)(RDSAR_Q1_LOW_8125 + (i - 1) * 8);
@@ -616,12 +633,12 @@ bool ZRTL8126::initRTL8126()
         imr_reg[0] = IMR0_8125;
         for (i = 1; i < R8126_MAX_MSIX_VEC; i++)
                 imr_reg[i] = (UInt16)(IMR1_8125 + (i - 1) * 4);
-        
-        for (i = 0; i < R8126_MAX_RX_QUEUES; i++)
-                   rx_ring[i].num_rx_desc = kNumRxDesc;
 
-           for (i = 0; i < R8126_MAX_TX_QUEUES; i++)
-                   tx_ring[i].num_tx_desc = kNumTxDesc;
+        for (i = 0; i < R8126_MAX_RX_QUEUES; i++)
+                rx_ring[i].num_rx_desc = kNumRxDesc;
+
+        for (i = 0; i < R8126_MAX_TX_QUEUES; i++)
+                tx_ring[i].num_tx_desc = kNumTxDesc;
         /* Reset the tally counter. */
         WriteReg32(CounterAddrHigh, (statPhyAddr >> 32));
         WriteReg32(CounterAddrLow, (statPhyAddr & 0x00000000ffffffff) | CounterReset);
@@ -712,6 +729,7 @@ void ZRTL8126::setupRTL8126()
 {
         struct rtl8126_private *tp = &linuxData;
         UInt16 mac_ocp_data;
+        UInt32 rss_ctrl;
 
         //     rtl8126_disable_rx_packet_filter(tp);
 
@@ -795,9 +813,57 @@ void ZRTL8126::setupRTL8126()
                 rtl8126_csi_write(tp, 0x890, rtl8126_csi_read(tp, 0x890) & ~BIT(0));
 
                 /* Disable RSS. */
-                WriteReg32(RSS_CTRL_8125, 0x00);
-                WriteReg16(Q_NUM_CTRL_8125, 0x0000);
+                // WriteReg32(RSS_CTRL_8125, 0x00);
+                // WriteReg16(Q_NUM_CTRL_8125, 0x0000);
 
+                /* enable RSS. */
+                rss_ctrl = (tp->HwSuppNumRxQueues >= 32) ? 5 : 
+                                (tp->HwSuppNumRxQueues >= 16) ? 4 : 
+                                (tp->HwSuppNumRxQueues >= 8)  ? 3 : 2;
+                rss_ctrl &= (BIT_0 | BIT_1 | BIT_2);
+                rss_ctrl <<= RSS_CPU_NUM_OFFSET;
+
+                /* Perform hash on these packet types 待确定*/
+                rss_ctrl |= RSS_CTRL_TCP_IPV4_SUPP | RSS_CTRL_IPV4_SUPP | RSS_CTRL_IPV6_SUPP | RSS_CTRL_IPV6_EXT_SUPP | RSS_CTRL_TCP_IPV6_SUPP | RSS_CTRL_TCP_IPV6_EXT_SUPP | RSS_CTRL_UDP_IPV4_SUPP | RSS_CTRL_UDP_IPV6_SUPP |
+                            RSS_CTRL_UDP_IPV6_EXT_SUPP;
+                UInt32 hash_mask_len = 7;
+                rss_ctrl |= (hash_mask_len &= (BIT_0 | BIT_1 | BIT_2)) << RSS_MASK_BITS_OFFSET;
+                WriteReg32(RSS_CTRL_8125, rss_ctrl);
+
+                UInt32 i;
+                UInt32 reta = 0;
+                UInt32 indir_tbl_reg = RSS_INDIRECTION_TBL_8125_V2;
+                UInt8 *indir_tbl = tp->rss_indir_tbl;
+                for (i = 0; i < tp->HwSuppIndirTblEntries; i++) {
+                                reta |= indir_tbl[i] << (i & 0x3) * 8;
+                                if ((i & 3) == 3) {
+                                        WriteReg32(indir_tbl_reg, reta);
+                                        indir_tbl_reg += 4;
+                                        reta = 0;
+                                }
+                        }
+
+                const UInt16 rss_key_reg = RSS_KEY_8125;
+                UInt32 l, rss_key_size = sizeof(tp->rss_key);
+                UInt32 *rss_key = (UInt32*)tp->rss_key;
+
+                /* Write redirection table to HW */
+                for (l = 0; l < rss_key_size; l+=4)
+                        WriteReg32(rss_key_reg + l, rss_key[l / 4]);
+
+                UInt16 q_ctrl;
+                UInt16 rx_q_num;
+                rx_q_num = (tp->HwSuppNumRxQueues >= 32) ? 5 : 
+                                (tp->HwSuppNumRxQueues >= 16) ? 4 : 
+                                (tp->HwSuppNumRxQueues >= 8)  ? 3 : 2;;
+                rx_q_num &= (BIT_0 | BIT_1 | BIT_2);
+                rx_q_num <<= 2;
+                q_ctrl = ReadReg16(Q_NUM_CTRL_8125);
+                q_ctrl &= ~(BIT_2 | BIT_3 | BIT_4);
+                q_ctrl |= rx_q_num;
+                WriteReg16(Q_NUM_CTRL_8125, q_ctrl);
+
+                
                 WriteReg8(Config1, ReadReg8(Config1) & ~0x10);
 
                 rtl8126_mac_ocp_write(tp, 0xC140, 0xFFFF);
@@ -807,18 +873,19 @@ void ZRTL8126::setupRTL8126()
                 mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xEB58);
                 if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
                         mac_ocp_data &= ~(BIT_0 | BIT_1);
-//                mac_ocp_data &= ~(BIT_0);
-                 mac_ocp_data |= (BIT_0);
+                //                mac_ocp_data &= ~(BIT_0);
+                mac_ocp_data |= (BIT_0);
                 rtl8126_mac_ocp_write(tp, 0xEB58, mac_ocp_data);
 
-                 if (tp->HwSuppRxDescType == RX_DESC_RING_TYPE_4) {
-                 if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
-                         WriteReg8(0xd8, ReadReg8(0xd8) |
-                                EnableRxDescV4_0);
-                 else
-                        WriteReg8(0xd8, ReadReg8(0xd8) &
-                                    ~EnableRxDescV4_0);
-                 }
+                if (tp->HwSuppRxDescType == RX_DESC_RING_TYPE_4)
+                {
+                        if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
+                                WriteReg8(0xd8, ReadReg8(0xd8) |
+                                                    EnableRxDescV4_0);
+                        else
+                                WriteReg8(0xd8, ReadReg8(0xd8) &
+                                                    ~EnableRxDescV4_0);
+                }
 
                 mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE614);
                 mac_ocp_data &= ~(BIT_10 | BIT_9 | BIT_8);
@@ -2305,4 +2372,3 @@ void ZRTL8126::configPhyHardware8126a3()
         if (aspm && HW_HAS_WRITE_PHY_MCU_RAM_CODE(tp))
                 rtl8126_enable_phy_aldps(tp);
 }
-
