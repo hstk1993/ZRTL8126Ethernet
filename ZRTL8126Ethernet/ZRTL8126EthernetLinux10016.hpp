@@ -2841,8 +2841,6 @@ void rtl8126_set_eth_phy_bit(struct rtl8126_private *tp,  u8  addr, u16  mask);
 void rtl8126_ocp_write(struct rtl8126_private *tp, u16 addr, u8 len, u32 data);
 void rtl8126_oob_notify(struct rtl8126_private *tp, u8 cmd);
 void rtl8126_init_ring_indexes(struct rtl8126_private *tp);
-void rtl8126_oob_mutex_lock(struct rtl8126_private *tp);
-u32 rtl8126_ocp_read(struct rtl8126_private *tp, u16 addr, u8 len);
 u32 rtl8126_ocp_read_with_oob_base_address(struct rtl8126_private *tp, u16 addr, u8 len, u32 base_address);
 u32 rtl8126_ocp_write_with_oob_base_address(struct rtl8126_private *tp, u16 addr, u8 len, u32 value, u32 base_address);
 u32 rtl8126_eri_read(struct rtl8126_private *tp, int addr, int len, int type);

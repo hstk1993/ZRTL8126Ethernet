@@ -1408,9 +1408,6 @@ void ZRTL8126::configPhyHardware()
 
         tp->phy_reset_enable(tp);
 
-        if (HW_DASH_SUPPORT_TYPE_3(tp) && tp->HwPkgDet == 0x06)
-                return;
-
         rtl8126_init_hw_phy_mcu(tp);
 
         switch (tp->mcfg)
