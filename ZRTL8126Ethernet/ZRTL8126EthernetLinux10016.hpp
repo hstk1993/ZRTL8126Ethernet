@@ -47,7 +47,6 @@
 #include "linux.h"
 #include "mii.h"
 #include "ethertool.h"
-#include "r8126_dash.h"
 
 #if DISABLED_CODE
 

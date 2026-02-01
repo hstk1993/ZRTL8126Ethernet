@@ -27,12 +27,10 @@ bool ZRTL8126::initPCIConfigSpace(IOPCIDevice *provider)
         if (provider->extendedFindPCICapability(kIOPCIPowerManagementCapability, &pmCapOffset))
         {
                 pmCap = provider->extendedConfigRead16(pmCapOffset + kIOPCIPMCapability);
-                DebugLog("ZRTL8126: PCI power management capabilities: 0x%x.\n", pmCap);
 
                 if (pmCap & kPCIPMCPMESupportFromD3Cold)
                 {
                         wolCapable = true;
-                        DebugLog("ZRTL8126: PME# from D3 (cold) supported.\n");
                 }
                 pciPMCtrlOffset = pmCapOffset + kIOPCIPMControl;
         }
@@ -203,8 +201,6 @@ bool ZRTL8126::initRTL8126()
 
         tp->max_jumbo_frame_size = rtl_chip_info[tp->chipset].jumbo_frame_sz;
 
-        tp->HwSuppDashVer = 0;
-
         switch (tp->mcfg)
         {
         case CFG_METHOD_1:
@@ -212,24 +208,9 @@ bool ZRTL8126::initRTL8126()
         case CFG_METHOD_3:
                 tp->HwPkgDet = rtl8126_mac_ocp_read(tp, 0xDC00);
                 tp->HwPkgDet = (tp->HwPkgDet >> 3) & 0x07;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 tp->HwSuppNowIsOobVer = 1;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 tp->HwPcieSNOffset = 0x174;
+
                 break;
         }
 
@@ -290,36 +271,13 @@ bool ZRTL8126::initRTL8126()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 tp->HwSuppMagicPktVer = WAKEUP_MAGIC_PACKET_V3;
+                tp->HwSuppLinkChgWakeUpVer = 3;
+                tp->HwSuppD0SpeedUpVer = 1;
+                tp->HwSuppCheckPhyDisableModeVer = 3;
+
                 break;
         default:
                 tp->HwSuppMagicPktVer = WAKEUP_MAGIC_PACKET_NOT_SUPPORT;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
-                tp->HwSuppLinkChgWakeUpVer = 3;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
-                tp->HwSuppD0SpeedUpVer = 1;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
-                tp->HwSuppCheckPhyDisableModeVer = 3;
                 break;
         }
 
@@ -379,23 +337,7 @@ bool ZRTL8126::initRTL8126()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 tp->HwSuppMacMcuVer = 2;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 tp->MacMcuPageSize = RTL8126_MAC_MCU_PAGE_SIZE;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 tp->HwSuppNumTxQueues = 2;
                 tp->HwSuppNumRxQueues = 4;
                 break;
@@ -427,15 +369,6 @@ bool ZRTL8126::initRTL8126()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 tp->HwSuppPtpVer = 2;
-                break;
-        }
-
-        // RSS
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 tp->HwSuppRssVer = 5;
                 tp->HwSuppIndirTblEntries = 128;
                 break;
@@ -463,14 +396,6 @@ bool ZRTL8126::initRTL8126()
                 tp->TcamValidReg = TCAM_VALID_ADDR_V2;
                 tp->TcamMaAddrcOffset = TCAM_MAC_ADDR_V2;
                 tp->TcamVlanTagOffset = TCAM_VLAN_TAG_V2;
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 tp->HwSuppExtendTallyCounterVer = 1;
                 break;
         }
@@ -669,7 +594,6 @@ void ZRTL8126::disableRTL8126()
 
 void ZRTL8126::restartRTL8126()
 {
-        DebugLog("ZRTL8126: restartRTL8125() ===>\n");
 
         /* Stop output thread and flush txQueue */
         netif->stopOutputThread();
@@ -694,8 +618,6 @@ void ZRTL8126::setupRTL8126()
 {
         struct rtl8126_private *tp = &linuxData;
         UInt16 mac_ocp_data;
-
-        //     rtl8126_disable_rx_packet_filter(tp);
 
         WriteReg32(RxConfig, ReadReg32(RxConfig) & ~(AcceptErr | AcceptRunt | AcceptBroadcast | AcceptMulticast | AcceptMyPhys | AcceptAllPhys));
 
@@ -1089,8 +1011,6 @@ void ZRTL8126::setOffset79(UInt8 setting)
 {
         UInt8 deviceControl;
 
-        DebugLog("ZRTL8126: setOffset79() ===>\n");
-
         if (!(linuxData.hwoptimize & HW_PATCH_SOC_LAN))
         {
                 deviceControl = pciDevice->configRead8(0x79);
@@ -1099,7 +1019,6 @@ void ZRTL8126::setOffset79(UInt8 setting)
                 pciDevice->configWrite8(0x79, deviceControl);
         }
 
-        DebugLog("ZRTL8126: setOffset79() <===\n");
 }
 
 UInt8 ZRTL8126::csiFun0ReadByte(UInt32 addr)
@@ -1190,17 +1109,10 @@ void ZRTL8126::disablePCIOffset99()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 rtl8126_mac_ocp_write(tp, 0xE032, rtl8126_mac_ocp_read(tp, 0xE032) & ~(BIT_0 | BIT_1));
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 csiFun0WriteByte(0x99, 0x00);
                 break;
         }
+
 }
 
 void ZRTL8126::initPCIOffset99()
@@ -1275,21 +1187,7 @@ void ZRTL8126::setPCI99_180ExitDriverPara()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 rtl8126_issue_offset_99_event(tp);
-                break;
-        }
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 disablePCIOffset99();
-                break;
-        }
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 rtl8126_disable_pci_offset_180(tp);
                 break;
         }
@@ -1305,16 +1203,10 @@ void ZRTL8126::setPCI99_ExitDriverPara()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 rtl8126_issue_offset_99_event(tp);
-                break;
-        }
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 disablePCIOffset99();
                 break;
         }
+
 }
 
 void ZRTL8126::hardwareD3Para()
@@ -1438,7 +1330,7 @@ void ZRTL8126::powerDownPLL()
 {
         struct rtl8126_private *tp = &linuxData;
 
-        if (tp->wol_enabled == WOL_ENABLED || tp->DASH || tp->EnableKCPOffload)
+        if (tp->wol_enabled == WOL_ENABLED || tp->EnableKCPOffload)
         {
                 int auto_nego;
                 int giga_ctrl;
@@ -1472,9 +1364,6 @@ void ZRTL8126::powerDownPLL()
                 else
                         auto_nego |= (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10HALF | ADVERTISE_10FULL);
 
-                if (tp->DASH)
-                        auto_nego |= (ADVERTISE_100FULL | ADVERTISE_100HALF | ADVERTISE_10HALF | ADVERTISE_10FULL);
-
                 giga_ctrl = rtl8126_mdio_read(tp, MII_CTRL1000) & ~(ADVERTISE_1000HALF | ADVERTISE_1000FULL);
                 rtl8126_mdio_write(tp, MII_ADVERTISE, auto_nego);
                 rtl8126_mdio_write(tp, MII_CTRL1000, giga_ctrl);
@@ -1496,9 +1385,6 @@ void ZRTL8126::powerDownPLL()
                 return;
         }
 
-        if (tp->DASH)
-                return;
-
         rtl8126_phy_power_down(tp);
 
         switch (tp->mcfg)
@@ -1507,17 +1393,10 @@ void ZRTL8126::powerDownPLL()
         case CFG_METHOD_2:
         case CFG_METHOD_3:
                 WriteReg8(PMCH, ReadReg8(PMCH) & ~BIT_7);
-                break;
-        }
-
-        switch (tp->mcfg)
-        {
-        case CFG_METHOD_1:
-        case CFG_METHOD_2:
-        case CFG_METHOD_3:
                 WriteReg8(0xF2, ReadReg8(0xF2) & ~BIT_6);
                 break;
         }
+
 }
 
 void ZRTL8126::configPhyHardware()
@@ -1531,8 +1410,6 @@ void ZRTL8126::configPhyHardware()
 
         if (HW_DASH_SUPPORT_TYPE_3(tp) && tp->HwPkgDet == 0x06)
                 return;
-
-        // rtl8126_set_hw_phy_before_init_phy_mcu(tp);
 
         rtl8126_init_hw_phy_mcu(tp);
 
@@ -1559,14 +1436,6 @@ void ZRTL8126::configPhyHardware()
                 rtl8126_clear_eth_phy_ocp_bit(tp, 0xA5B4, BIT_15);
                 break;
         }
-
-        /*ocp phy power saving*/
-        /*
-         if (aspm) {
-         if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
-         rtl8126_enable_ocp_phy_power_saving(dev);
-         }
-         */
 
         rtl8126_mdio_write(tp, 0x1F, 0x0000);
 
