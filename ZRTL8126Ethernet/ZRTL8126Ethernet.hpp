@@ -117,12 +117,30 @@ enum RtlStateMask {
     __POLLING_M = (1 << __POLLING),
 };
 
+typedef struct RtlRxDescV4 {
+        union {
+                u64   addr;
+
+                struct {
+                        u32 RSSInfo;
+                        u32 RSSResult;
+                } RxDescNormalDDWord1;
+        };
+
+        struct {
+                u32 opts2;
+                u32 opts1;
+        } RxDescNormalDDWord2;
+}RtlRxDescV4;
 /* RTL8126's old Rx descriptor. */
 typedef struct RtlRxDesc {
     UInt32 opts1;
     UInt32 opts2;
     UInt64 addr;
 } RtlRxDesc;
+
+
+static_assert(sizeof(RtlRxDescV4) == 16, "V4 desc size must be 16 bytes");
 
 /* RTL8126's old Tx descriptor. */
 typedef struct RtlTxDesc {
@@ -165,7 +183,7 @@ typedef struct RtlStatData {
 #define kTxDescMask    (kNumTxDesc - 1)
 #define kRxDescMask    (kNumRxDesc - 1)
 #define kTxDescSize    (kNumTxDesc*sizeof(struct RtlTxDesc))
-#define kRxDescSize    (kNumRxDesc*sizeof(struct RtlRxDesc))
+#define kRxDescSize    (kNumRxDesc*sizeof(struct RtlRxDescV4))
 #define kRxBufArraySize (kNumRxDesc * sizeof(mbuf_t))
 #define kTxBufArraySize (kNumTxDesc * sizeof(mbuf_t))
 
@@ -383,7 +401,7 @@ private:
     IOBufferMemoryDescriptor *rxBufDesc;
     IOPhysicalAddress64 rxPhyAddr;
     IODMACommand *rxDescDmaCmd;
-    struct RtlRxDesc *rxDescArray;
+    struct RtlRxDescV4 *rxDescArray;
     IOMbufNaturalMemoryCursor *rxMbufCursor;
     mbuf_t *rxMbufArray;
     void *rxBufArrayMem;

@@ -1500,6 +1500,10 @@ enum RTL8126_register_content {
         RxRES_V3 = (1 << 20),
         RxRUNT_V3 = (1 << 19),
         RxCRC_V3 = (1 << 17),
+    
+        RxRES_V4 = (1 << 22),
+        RxRUNT_V4 = (1 << 21),
+        RxCRC_V4 = (1 << 20),
 
         /* ChipCmdBits */
         StopReq  = 0x80,

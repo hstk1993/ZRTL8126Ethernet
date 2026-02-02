@@ -273,7 +273,7 @@ bool ZRTL8126::setupRxResources()
         IOLog("ZRTL8126: rxBufDesc->prepare() failed.\n");
         goto error_prep;
     }
-    rxDescArray = (RtlRxDesc *)rxBufDesc->getBytesNoCopy();
+    rxDescArray = (RtlRxDescV4 *)rxBufDesc->getBytesNoCopy();
 
     rxDescDmaCmd = IODMACommand::withSpecification(kIODMACommandOutputHost64, 64, 0, IODMACommand::kMapped, 0, 1, mapper, NULL);
     
@@ -296,7 +296,7 @@ bool ZRTL8126::setupRxResources()
     
     /* Initialize rxDescArray. */
     bzero(rxDescArray, kRxDescSize);
-    rxDescArray[kRxLastDesc].opts1 = OSSwapHostToLittleInt32(RingEnd);
+    rxDescArray[kRxLastDesc].RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(RingEnd);
 
     for (i = 0; i < kNumRxDesc; i++) {
         rxMbufArray[i] = NULL;
@@ -326,8 +326,8 @@ bool ZRTL8126::setupRxResources()
         }
         opts1 = (UInt32)rxSegment.length;
         opts1 |= (i == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
-        rxDescArray[i].opts1 = OSSwapHostToLittleInt32(opts1);
-        rxDescArray[i].opts2 = 0;
+        rxDescArray[i].RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(opts1);
+        rxDescArray[i].RxDescNormalDDWord2.opts2 = 0;
         rxDescArray[i].addr = OSSwapHostToLittleInt64(rxSegment.location);
     }
     /*
@@ -661,8 +661,8 @@ void ZRTL8126::clearRxTxRings()
     for (i = 0; i < kNumRxDesc; i++) {
         opts1 = rxBufferSize;
         opts1 |= (i == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
-        rxDescArray[i].opts1 = OSSwapHostToLittleInt32(opts1);
-        rxDescArray[i].opts2 = 0;
+        rxDescArray[i].RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(opts1);
+        rxDescArray[i].RxDescNormalDDWord2.opts2 = 0;
     }
     rxNextDescIndex = 0;
     deadlockWarn = 0;

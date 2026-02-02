@@ -426,8 +426,10 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
     //DebugLog("ZRTL8126: outputStart() ===>\n");
     
     if (!(test_mask((__ENABLED_M | __LINK_UP_M), &stateFlags)))  {
-        DebugLog("ZRTL8126: Interface down. Dropping packets.\n");
-        goto done;
+        while (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess) {
+            freePacket(m);
+        }
+        return kIOReturnOutputStall;
     }
     while ((txNumFreeDesc > (kMaxSegs + 3)) && (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess)) {
         cmd = 0;
@@ -1034,7 +1036,7 @@ void ZRTL8126::txInterrupt()
 UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, IOMbufQueue *pollQueue, void *context)
 {
     IOPhysicalSegment rxSegment;
-    RtlRxDesc *desc = &rxDescArray[rxNextDescIndex];
+    RtlRxDescV4 *desc = &rxDescArray[rxNextDescIndex];
     mbuf_t bufPkt, newPkt;
     UInt64 addr;
     UInt32 opts1, opts2;
@@ -1043,7 +1045,7 @@ UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, I
     UInt32 goodPkts = 0;
     bool replaced;
     
-    while (!((descStatus1 = OSSwapLittleToHostInt32(desc->opts1)) & DescOwn) && (goodPkts < maxCount)) {
+    while (!((descStatus1 = OSSwapLittleToHostInt32(desc->RxDescNormalDDWord2.opts1)) & DescOwn) && (goodPkts < maxCount)) {
         opts1 = (rxNextDescIndex == kRxLastDesc) ? (RingEnd | DescOwn) : DescOwn;
         opts2 = 0;
         addr = 0;
@@ -1056,18 +1058,18 @@ UInt32 ZRTL8126::rxInterrupt(IONetworkInterface *interface, uint32_t maxCount, I
         }
         
         /* Drop packets with receive errors. */
-        if (unlikely(descStatus1 & RxRES)) {            
-            if (descStatus1 & (RxRWT | RxRUNT))
+        if (unlikely(descStatus1 & RxRES_V4)) {
+            if (descStatus1 & RxRUNT_V4)
                 etherStats->dot3StatsEntry.frameTooLongs++;
 
-            if (descStatus1 & RxCRC)
+            if (descStatus1 & RxCRC_V4)
                 etherStats->dot3StatsEntry.fcsErrors++;
 
             opts1 |= rxBufferSize;
             goto nextDesc;
         }
         
-        descStatus2 = OSSwapLittleToHostInt32(desc->opts2);
+        descStatus2 = OSSwapLittleToHostInt32(desc->RxDescNormalDDWord2.opts2);
         pktSize = (descStatus1 & 0x1fff) - kIOEthernetCRCSize;
         bufPkt = rxMbufArray[rxNextDescIndex];
         
@@ -1131,8 +1133,8 @@ handle_pkt:
         if (addr)
             desc->addr = OSSwapHostToLittleInt64(addr);
         
-        desc->opts2 = OSSwapHostToLittleInt32(opts2);
-        desc->opts1 = OSSwapHostToLittleInt32(opts1);
+        desc->RxDescNormalDDWord2.opts2 = OSSwapHostToLittleInt32(opts2);
+        desc->RxDescNormalDDWord2.opts1 = OSSwapHostToLittleInt32(opts1);
         
         ++rxNextDescIndex &= kRxDescMask;
         desc = &rxDescArray[rxNextDescIndex];

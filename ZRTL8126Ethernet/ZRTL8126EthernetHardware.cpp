@@ -400,38 +400,10 @@ bool ZRTL8126::initRTL8126()
                 break;
         }
 
-        // switch (tp->mcfg) {
-        // case CFG_METHOD_1:
-        //         tp->HwSuppRxDescType = RX_DESC_RING_TYPE_3;
-        //         break;
-        // case CFG_METHOD_2:
-        // case CFG_METHOD_3:
-        //         tp->HwSuppRxDescType = RX_DESC_RING_TYPE_4;
-        //         break;
-        // default:
-        //         tp->HwSuppRxDescType = RX_DESC_RING_TYPE_1;
-        //         break;
-        // }
+        tp->HwSuppRxDescType = RX_DESC_RING_TYPE_4;
+        tp->InitRxDescType = RX_DESC_RING_TYPE_4;
+        tp->RxDescLength = RX_DESC_LEN_TYPE_4;
 
-        // tp->InitRxDescType = RX_DESC_RING_TYPE_1;
-        // tp->RxDescLength = RX_DESC_LEN_TYPE_1;
-
-        // switch (tp->HwSuppRxDescType) {
-        // case RX_DESC_RING_TYPE_3:
-        //                 tp->InitRxDescType = RX_DESC_RING_TYPE_3;
-        //                 tp->RxDescLength = RX_DESC_LEN_TYPE_3;
-        //         break;
-        // case RX_DESC_RING_TYPE_4:
-        //                 tp->InitRxDescType = RX_DESC_RING_TYPE_4;
-        //                 tp->RxDescLength = RX_DESC_LEN_TYPE_4;
-        //         break;
-        // }
-
-        // tp->rtl8126_rx_config = rtl_chip_info[tp->chipset].RCR_Cfg;
-        // if (tp->InitRxDescType == RX_DESC_RING_TYPE_3)
-        //         tp->rtl8126_rx_config |= EnableRxDescV3;
-        // else if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
-        //         tp->rtl8126_rx_config &= ~EnableRxDescV4_1;
 
         tp->NicCustLedValue = ReadReg16(CustomLED);
 
@@ -523,6 +495,8 @@ bool ZRTL8126::initRTL8126()
 
         /* Get the RxConfig parameters. */
         rxConfigReg = rtl_chip_info[tp->chipset].RCR_Cfg;
+        rxConfigReg &= ~EnableRxDescV4_1;
+
         // if (tp->InitRxDescType == RX_DESC_RING_TYPE_3)
         //         rxConfigReg |= EnableRxDescV3;
         // else if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
@@ -712,17 +686,12 @@ void ZRTL8126::setupRTL8126()
                 if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
                         mac_ocp_data &= ~(BIT_0 | BIT_1);
                 mac_ocp_data &= ~(BIT_0);
-                // mac_ocp_data |= (BIT_0);
+//                 mac_ocp_data |= (BIT_0);
                 rtl8126_mac_ocp_write(tp, 0xEB58, mac_ocp_data);
 
-                // if (tp->HwSuppRxDescType == RX_DESC_RING_TYPE_4) {
-                // if (tp->InitRxDescType == RX_DESC_RING_TYPE_4)
-                //         WriteReg8(0xd8, ReadReg8(0xd8) |
-                //                EnableRxDescV4_0);
-                // else
-                WriteReg8(0xd8, ReadReg8(0xd8) &
-                                    ~EnableRxDescV4_0);
-                // }
+
+                WriteReg8(0xd8, ReadReg8(0xd8) | EnableRxDescV4_0);
+
 
                 mac_ocp_data = rtl8126_mac_ocp_read(tp, 0xE614);
                 mac_ocp_data &= ~(BIT_10 | BIT_9 | BIT_8);
