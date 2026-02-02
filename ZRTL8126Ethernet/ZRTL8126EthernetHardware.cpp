@@ -686,7 +686,7 @@ void ZRTL8126::setupRTL8126()
                 if (tp->mcfg == CFG_METHOD_2 || tp->mcfg == CFG_METHOD_3)
                         mac_ocp_data &= ~(BIT_0 | BIT_1);
                 mac_ocp_data &= ~(BIT_0);
-//                 mac_ocp_data |= (BIT_0);
+                // mac_ocp_data |= (BIT_0);
                 rtl8126_mac_ocp_write(tp, 0xEB58, mac_ocp_data);
 
 
