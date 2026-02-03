@@ -159,7 +159,7 @@ typedef struct RtlStatData {
 
 /* The number of descriptors must be a power of 2. */
 #define kNumTxDesc    1024    /* Number of Tx descriptors */
-#define kNumRxDesc    512    /* Number of Rx descriptors */
+#define kNumRxDesc    1024    /* Number of Rx descriptors */
 #define kTxLastDesc    (kNumTxDesc - 1)
 #define kRxLastDesc    (kNumRxDesc - 1)
 #define kTxDescMask    (kNumTxDesc - 1)
@@ -184,7 +184,7 @@ typedef struct RtlStatData {
 #define kTxQueueWakeTreshhold (kNumTxDesc / 10)
 
 /* transmitter deadlock treshhold in seconds. */
-#define kTxDeadlockTreshhold 266
+#define kTxDeadlockTreshhold 6
 #define kTxCheckTreshhold (kTxDeadlockTreshhold - 1)
 
 /* MSS value position */

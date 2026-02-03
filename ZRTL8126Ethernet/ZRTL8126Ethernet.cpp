@@ -426,8 +426,10 @@ IOReturn ZRTL8126::outputStart(IONetworkInterface *interface, IOOptionBits optio
     //DebugLog("ZRTL8126: outputStart() ===>\n");
     
     if (!(test_mask((__ENABLED_M | __LINK_UP_M), &stateFlags)))  {
-        DebugLog("ZRTL8126: Interface down. Dropping packets.\n");
-        goto done;
+          while (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess) {
+            freePacket(m);
+        }
+        return kIOReturnOutputStall;
     }
     while ((txNumFreeDesc > (kMaxSegs + 3)) && (interface->dequeueOutputPackets(1, &m, NULL, NULL, NULL) == kIOReturnSuccess)) {
         cmd = 0;
