@@ -1366,11 +1366,11 @@ inline void ZRTL8126::getChecksumResult(mbuf_t m, UInt32 status1, UInt32 status2
     mbuf_csum_performed_flags_t performed = 0;
     UInt32 value = 0;
 
-    if ((status2 & RxV4F) && !(status1 & RxIPF))
+    if ((status2 & RxV4F_v4) && !(status1 & RxIPF_v4))
         performed |= (MBUF_CSUM_DID_IP | MBUF_CSUM_IP_GOOD);
 
-    if (((status1 & RxTCPT) && !(status1 & RxTCPF)) ||
-        ((status1 & RxUDPT) && !(status1 & RxUDPF))) {
+    if (((status1 & RxTCPT_v4) && !(status1 & RxTCPF_v4)) ||
+        ((status1 & RxUDPT_v4) && !(status1 & RxUDPF_v4))) {
         performed |= (MBUF_CSUM_DID_DATA | MBUF_CSUM_PSEUDO_HDR);
         value = 0xffff; // fake a valid checksum value
     }

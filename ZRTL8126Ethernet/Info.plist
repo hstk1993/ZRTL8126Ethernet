@@ -13,13 +13,13 @@
 				<key>disableASPM</key>
 				<true/>
 				<key>enableCSO6</key>
-				<false/>
+				<true/>
 				<key>enableEEE</key>
 				<false/>
 				<key>enableTSO4</key>
-				<false/>
+				<true/>
 				<key>enableTSO6</key>
-				<false/>
+				<true/>
 				<key>fallbackMAC</key>
 				<string></string>
 				<key>µsPollInt2500</key>

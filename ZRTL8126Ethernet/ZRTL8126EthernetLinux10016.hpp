@@ -1816,6 +1816,21 @@ enum _DescStatusBit {
         RxV6F_v3       = (RxV6F),
         RxV4F_v3       = (RxV4F),
         /*@@@@@@ offset 4 of rx descriptor => bits for RTL8125 only     end @@@@@@*/
+        RxIPF_v4       = (1 << 17), /* IP checksum failed */
+        RxUDPF_v4      = (1 << 16), /* UDP/IP checksum failed */
+        RxTCPF_v4      = (1 << 15), /* TCP/IP checksum failed */
+        RxSCTPF_v4     = (1 << 19), /* SCTP checksum failed */
+        RxVlanTag_v4   = (RxVlanTag), /* VLAN tag available */
+
+        /*@@@@@@ offset 0 of rx descriptor => bits for RTL8125 only     begin @@@@@@*/
+        RxUDPT_v4      = (1 << 19),
+        RxTCPT_v4      = (1 << 18),
+        RxSCTP_v4      = (1 << 19),
+        /*@@@@@@ offset 0 of rx descriptor => bits for RTL8125 only     end @@@@@@*/
+
+        /*@@@@@@ offset 4 of rx descriptor => bits for RTL8125 only     begin @@@@@@*/
+        RxV6F_v4       = (RxV6F),
+        RxV4F_v4       = (RxV4F),
 };
 
 enum features {
